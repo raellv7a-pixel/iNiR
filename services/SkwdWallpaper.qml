@@ -23,12 +23,13 @@ Singleton {
     property bool subscribed: false
     property string themeAuthority: ""
     property bool pickOnly: true
+    property bool rendererReleased: true
     property var capabilities: []
     readonly property bool integrationCompatible: root.ready
         && root.capabilities.includes("inir-theme-authority-v1")
         && root.capabilities.includes("output-theme-source-v1")
     readonly property bool integrationEligible: root.integrationCompatible
-        && root.themeAuthority === "inir" && !root.pickOnly
+        && root.themeAuthority === "inir" && !root.pickOnly && !root.rendererReleased
     property var outputs: []
     property string lastError: ""
     property int requestSerial: 0
@@ -36,8 +37,11 @@ Singleton {
     property int newestOutputsRequest: 0
     property var pending: ({})
     property int reconnectAttempt: 0
+    property bool colorSyncEnabled: false
+    property alias themeOutput: themeCoordinator.output
 
     signal wallpaperApplied(var data)
+    signal themeSourceReady(string path, string output, double generation)
     signal requestFinished(int id, string method, var result, var error)
     signal disconnected()
 
@@ -60,12 +64,24 @@ Singleton {
         root.send("wall.outputs", {})
     }
 
+    function reconcile(): void {
+        if (root.colorSyncEnabled && root.integrationEligible
+                && root.capabilities.includes("rendered-snapshot-v1"))
+            root.send("integration.snapshot", {})
+    }
+
+    onIntegrationEligibleChanged: if (root.integrationEligible) root.reconcile()
+    onColorSyncEnabledChanged: if (root.colorSyncEnabled) root.reconcile()
+
     function handleLine(line: string): void {
         let message
         try { message = JSON.parse(line) } catch (error) { return }
         if (!message || typeof message !== "object") return
         if (typeof message.event === "string") {
-            if (message.event === "skwd.wall.applied") root.wallpaperApplied(message.data ?? ({}))
+            if (message.event === "skwd.wall.applied") {
+                themeCoordinator.accept(message.data ?? ({}))
+                root.wallpaperApplied(message.data ?? ({}))
+            }
             else if (message.event === "skwd.wall.outputs_changed") root.send("wall.outputs", {})
             else if (message.event === "skwd.wall.config_changed") root.send("status", {})
             return
@@ -85,6 +101,7 @@ Singleton {
                 root.protocolReady = false
                 root.themeAuthority = ""
                 root.pickOnly = true
+                root.rendererReleased = true
                 root.capabilities = []
             }
         } else if (method === "subscribe") root.subscribed = result.subscribed === true
@@ -92,10 +109,19 @@ Singleton {
             root.protocolReady = result.protocol?.name === "skwd-wall" && Number(result.protocol?.version) === 1
             root.themeAuthority = String(result.theme_authority ?? "")
             root.pickOnly = result.pick_only !== false
+            root.rendererReleased = result.renderer_released !== false
             root.capabilities = Array.isArray(result.integration_features) ? result.integration_features : []
             if (!root.protocolReady) root.lastError = "Unsupported Skwd protocol"
         } else if (method === "wall.outputs" && id === root.newestOutputsRequest) {
             root.outputs = Array.isArray(result.outputs) ? result.outputs : []
+        } else if (method === "integration.snapshot") {
+            themeCoordinator.seed(result)
+        } else if (method === "integration.release" && result.released === true) {
+            root.rendererReleased = true
+        } else if (method === "integration.acquire" && result.claimed === true) {
+            // A claim permits rendering but is not a readiness confirmation.
+            root.rendererReleased = false
+            root.refresh()
         }
         root.requestFinished(id, method, result, error)
     }
@@ -132,6 +158,7 @@ Singleton {
                 root.subscribed = false
                 root.themeAuthority = ""
                 root.pickOnly = true
+                root.rendererReleased = true
                 root.capabilities = []
                 root.outputs = []
                 const lost = root.pending
@@ -142,6 +169,11 @@ Singleton {
                 root.scheduleReconnect()
             }
         }
+    }
+    SkwdThemeCoordinator {
+        id: themeCoordinator
+        enabled: root.colorSyncEnabled && root.integrationEligible
+        onThemeSourceReady: (path, output, generation) => root.themeSourceReady(path, output, generation)
     }
     Timer {
         id: reconnect

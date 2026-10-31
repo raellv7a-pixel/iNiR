@@ -25,6 +25,7 @@ Singleton {
     property string _queuedApplyPath: ""
     property bool _queuedApplyDarkMode: Appearance.m3colors.darkmode
     property bool _queuedApplyNoSwitch: false
+    property bool _queuedApplyExactSource: false
     readonly property string backendProvider: "awww"
     readonly property bool awwwBackendEnabled: true
 
@@ -765,8 +766,8 @@ Singleton {
         return currentPath.length > 0 && currentPath === normalizedPath
     }
 
-    function _applyRequestKey(path: string, darkMode: bool, noSwitch: bool): string {
-        return [noSwitch ? "noswitch" : "switch", FileUtils.trimFileProtocol(String(path ?? "")), darkMode ? "dark" : "light"].join("|")
+    function _applyRequestKey(path: string, darkMode: bool, noSwitch: bool, exactSource = false): string {
+        return [noSwitch ? "noswitch" : "switch", exactSource ? "exact" : "configured", FileUtils.trimFileProtocol(String(path ?? "")), darkMode ? "dark" : "light"].join("|")
     }
 
     function _allMonitorNames(): var {
@@ -796,14 +797,14 @@ Singleton {
         root.wallpaperBlurTransitionRequested(_transitionTargetMonitors(monitorName), _wallpaperTransitionSettleMs())
     }
 
-    function _runWallpaperScript(path: string, darkMode: bool, noSwitch: bool): void {
+    function _runWallpaperScript(path: string, darkMode: bool, noSwitch: bool, exactSource = false): void {
         const normalizedPath = FileUtils.trimFileProtocol(String(path ?? ""))
         if (!normalizedPath || normalizedPath.length === 0)
             return
 
         root._applyInProgress = true
         _applySuppressTimer.restart()
-        applyProc.activeRequestKey = root._applyRequestKey(normalizedPath, darkMode, noSwitch)
+        applyProc.activeRequestKey = root._applyRequestKey(normalizedPath, darkMode, noSwitch, exactSource)
         const command = [
             Directories.wallpaperSwitchScriptPath,
             "--image", normalizedPath,
@@ -812,22 +813,30 @@ Singleton {
         ]
         if (noSwitch)
             command.splice(command.length - 1, 0, "--noswitch")
+        if (exactSource)
+            command.splice(command.length - 1, 0, "--exact-color-source")
         applyProc.exec(command)
     }
 
-    function _queueWallpaperScript(path: string, darkMode: bool, noSwitch: bool): void {
+    function _queueWallpaperScript(path: string, darkMode: bool, noSwitch: bool, exactSource = false): void {
         const normalizedPath = FileUtils.trimFileProtocol(String(path ?? ""))
         if (!normalizedPath || normalizedPath.length === 0)
             return
 
-        const requestKey = root._applyRequestKey(normalizedPath, darkMode, noSwitch)
+        const requestKey = root._applyRequestKey(normalizedPath, darkMode, noSwitch, exactSource)
         if (applyProc.running) {
-            if (applyProc.activeRequestKey === requestKey || applyProc.pendingRequestKey === requestKey)
+            if (applyProc.activeRequestKey === requestKey) {
+                // A newer choice returned to the active source: discard an older pending one.
+                root._queuedApplyPath = ""
+                applyProc.pendingRequestKey = ""
                 return
+            }
+            if (applyProc.pendingRequestKey === requestKey) return
 
             root._queuedApplyPath = normalizedPath
             root._queuedApplyDarkMode = darkMode
             root._queuedApplyNoSwitch = noSwitch
+            root._queuedApplyExactSource = exactSource
             applyProc.pendingRequestKey = requestKey
             root._applyInProgress = true
             _applySuppressTimer.restart()
@@ -836,7 +845,7 @@ Singleton {
 
         root._queuedApplyPath = ""
         applyProc.pendingRequestKey = ""
-        root._runWallpaperScript(normalizedPath, darkMode, noSwitch)
+        root._runWallpaperScript(normalizedPath, darkMode, noSwitch, exactSource)
     }
 
     Process {
@@ -849,13 +858,14 @@ Singleton {
             const nextPath = root._queuedApplyPath
             const nextDarkMode = root._queuedApplyDarkMode
             const nextNoSwitch = root._queuedApplyNoSwitch
+            const nextExactSource = root._queuedApplyExactSource
 
             activeRequestKey = ""
             pendingRequestKey = ""
             root._queuedApplyPath = ""
 
             if (nextKey !== "" && nextPath !== "") {
-                root._runWallpaperScript(nextPath, nextDarkMode, nextNoSwitch)
+                root._runWallpaperScript(nextPath, nextDarkMode, nextNoSwitch, nextExactSource)
                 return
             }
 
@@ -995,6 +1005,17 @@ Singleton {
         _applySuppressTimer.restart()
 
         root._queueWallpaperScript(normalizedPath, darkMode, true)
+    }
+
+    // An external renderer has already committed this image. Preserve the
+    // existing wallpaper configuration and serialize colour work with normal applies.
+    Connections {
+        target: SkwdWallpaper
+        function onThemeSourceReady(path: string, output: string, generation: real): void {
+            if (!SkwdWallpaper.integrationEligible || !SkwdWallpaper.colorSyncEnabled) return
+            if ((Config.options?.appearance?.theme ?? "auto") !== "auto") return
+            root._queueWallpaperScript(path, Appearance.m3colors.darkmode, true, true)
+        }
     }
 
     function updatePerMonitorConfig(path: string, monitorName: string) {

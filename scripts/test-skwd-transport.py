@@ -24,23 +24,29 @@ class SkwdTransportTest(unittest.TestCase):
             module = base / "testbridge"
             module.mkdir()
             (base / "runtime").mkdir(mode=0o700)
-            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\n")
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\n")
             shutil.copy(ROOT / "services/SkwdWallpaper.qml", module / "SkwdWallpaper.qml")
+            shutil.copy(ROOT / "services/SkwdThemeCoordinator.qml", module / "SkwdThemeCoordinator.qml")
             (base / "shell.qml").write_text('''import QtQuick
 import Quickshell
 import testbridge
 ShellRoot {
     Connections {
         target: SkwdWallpaper
-        function onWallpaperApplied(data) {
+        function onThemeSourceReady(path, output, generation) {
             if (!SkwdWallpaper.integrationEligible || SkwdWallpaper.themeAuthority !== "inir"
-                    || SkwdWallpaper.outputs.length !== 1 || data.output !== "DP-1") {
+                    || SkwdWallpaper.outputs.length !== 1 || output !== "DP-1"
+                    || path !== "/tmp/new.png" || generation !== 3) {
                 console.log("SKWD_TRANSPORT_BAD_STATE")
                 Qt.exit(1)
             } else { console.log("SKWD_TRANSPORT_OK"); Qt.exit(0) }
         }
     }
-    Component.onCompleted: SkwdWallpaper.enabled = true
+    Component.onCompleted: {
+        SkwdWallpaper.themeOutput = "DP-1"
+        SkwdWallpaper.colorSyncEnabled = true
+        SkwdWallpaper.enabled = true
+    }
     Timer { interval: 8000; running: true; onTriggered: { console.log("SKWD_TRANSPORT_TIMEOUT"); Qt.exit(1) } }
 }
 ''')
@@ -62,14 +68,23 @@ ShellRoot {
                                 method = req["method"]
                                 results = {
                                     "subscribe": {"subscribed": True},
-                                    "status": {"protocol": {"name": "skwd-wall", "version": 1}, "theme_authority": "inir", "pick_only": False, "integration_features": ["inir-theme-authority-v1", "output-theme-source-v1"]},
+                                    "status": {"protocol": {"name": "skwd-wall", "version": 1}, "theme_authority": "inir", "pick_only": False, "renderer_released": False, "integration_features": ["inir-theme-authority-v1", "output-theme-source-v1", "rendered-snapshot-v1"]},
                                     "wall.outputs": {"outputs": [{"name": "DP-1", "theme_source": "/tmp/a.png"}]},
+                                    "integration.snapshot": {"available": True, "outputs": [{"output": "DP-1", "theme_source": "/tmp/stale-snapshot.png", "rendered": True}]},
                                 }
                                 response = {"id": req["id"], "result": results.get(method, {})}
                                 stream.write((json.dumps(response) + "\n").encode())
                                 if method == "wall.outputs":
-                                    event = {"event": "skwd.wall.applied", "data": {"output": "DP-1", "theme_source": "/tmp/a.png"}}
-                                    stream.write((json.dumps(event) + "\n").encode())
+                                    for data in [
+                                        {"output": "DP-1", "theme_source": "/tmp/old.png", "generation": 1, "rendered": True},
+                                        {"output": "DP-2", "theme_source": "/tmp/other.png", "generation": 2, "rendered": True},
+                                        {"output": "DP-1", "theme_source": "/tmp/new.png", "generation": 3, "rendered": True},
+                                        {"output": "DP-1", "theme_source": "/tmp/not-rendered.png", "generation": 4, "rendered": False},
+                                        {"output": "DP-1", "theme_source": "/tmp/stale.png", "generation": 1, "rendered": True},
+                                    ]:
+                                        stream.write((json.dumps({"event": "skwd.wall.applied", "data": data}) + "\n").encode())
+                                if method == "integration.snapshot":
+                                    time.sleep(1)
                                     return
                 except Exception as error:
                     failures.append(error)

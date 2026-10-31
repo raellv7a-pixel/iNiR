@@ -394,8 +394,11 @@ switch() {
             fi
         fi
 
-        check_and_prompt_upscale "$imgpath" &
-        kill_existing_mpvpaper
+        # External colour synchronization must not inspect or stop any wallpaper renderer.
+        if [[ "${exact_color_source:-}" != "1" ]]; then
+            check_and_prompt_upscale "$imgpath" &
+            kill_existing_mpvpaper
+        fi
 
         if is_video "$imgpath"; then
             mkdir -p "$THUMBNAIL_DIR"
@@ -452,7 +455,7 @@ switch() {
 
             if ! has_valid_file "$thumbnail"; then
                 echo "Cannot create thumbnail for color generation"
-                remove_restore
+                [[ "${exact_color_source:-}" == "1" ]] || remove_restore
                 exit 1
             fi
 
@@ -468,7 +471,7 @@ switch() {
 
             # Use thumbnail for color generation
             generate_colors_material_args=(--path "$thumbnail")
-            remove_restore
+            [[ "${exact_color_source:-}" == "1" ]] || remove_restore
         else
             color_source="$imgpath"
             if is_gif "$imgpath"; then
@@ -486,7 +489,7 @@ switch() {
             if [[ "$skip_config_write" != "1" ]]; then
                 set_thumbnail_path ""
             fi
-            remove_restore
+            [[ "${exact_color_source:-}" == "1" ]] || remove_restore
         fi
     fi
 
@@ -502,7 +505,7 @@ switch() {
     # Terminal colors may optionally force dark mode, but that must not darken the shell palette.
     # If useBackdropForColors is enabled, override color source to use backdrop wallpaper
     # Respects active panel family: ii reads from background.backdrop, waffle from waffles.background.backdrop
-    if [[ "$color_flag" != "1" ]]; then
+    if [[ "$color_flag" != "1" && "${exact_color_source:-}" != "1" ]]; then
         if [[ "$cfg_use_backdrop" == "true" ]]; then
             local backdrop_use_main=""
             local backdrop_path=""
@@ -704,6 +707,7 @@ main() {
     color_flag=""
     color=""
     noswitch_flag=""
+    exact_color_source=""
     skip_config_write=""
     skip_accent_write=""
 
@@ -805,6 +809,12 @@ main() {
                 shift 2
                 ;;
             --noswitch)
+                noswitch_flag="1"
+                skip_config_write="1"
+                shift
+                ;;
+            --exact-color-source)
+                exact_color_source="1"
                 noswitch_flag="1"
                 skip_config_write="1"
                 shift
