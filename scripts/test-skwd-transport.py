@@ -15,6 +15,58 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SkwdTransportTest(unittest.TestCase):
+    def test_unresponsive_request_times_out(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-skwd-timeout-") as temp:
+            base = Path(temp)
+            module = base / "testbridge"
+            module.mkdir()
+            (base / "runtime").mkdir(mode=0o700)
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\n")
+            shutil.copy(ROOT / "services/SkwdWallpaper.qml", module / "SkwdWallpaper.qml")
+            shutil.copy(ROOT / "services/SkwdThemeCoordinator.qml", module / "SkwdThemeCoordinator.qml")
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+import testbridge
+ShellRoot {
+    Connections {
+        target: SkwdWallpaper
+        function onConnectedChanged() {
+            if (SkwdWallpaper.connected) SkwdWallpaper.send("integration.release", {})
+        }
+        function onRequestFinished(id, method, result, error) {
+            if (method !== "integration.release") return
+            if (error && String(error.message).includes("timed out")) {
+                console.log("SKWD_TIMEOUT_OK"); Qt.exit(0)
+            } else Qt.exit(1)
+        }
+    }
+    Component.onCompleted: { SkwdWallpaper.requestTimeoutMs = 100; SkwdWallpaper.enabled = true }
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            sockpath = base / "wall.sock"
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(sockpath))
+                listener.listen(1)
+                def server():
+                    conn, _ = listener.accept()
+                    with conn:
+                        while conn.recv(4096):
+                            pass
+                thread = threading.Thread(target=server, daemon=True)
+                thread.start()
+                env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QML_IMPORT_PATH=str(base),
+                           XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                           XDG_CACHE_HOME=str(base / "cache"), SKWD_WALL_V2_SOCK=str(sockpath))
+                proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"],
+                                      env=env, text=True, capture_output=True, timeout=8)
+                thread.join(timeout=2)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("SKWD_TIMEOUT_OK", proc.stdout + proc.stderr)
+
     def test_snapshot_seeds_selected_monitor_without_overwriting_events(self):
         quickshell = shutil.which("quickshell")
         if not quickshell:

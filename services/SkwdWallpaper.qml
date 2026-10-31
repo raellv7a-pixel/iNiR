@@ -36,6 +36,8 @@ Singleton {
     property int newestStatusRequest: 0
     property int newestOutputsRequest: 0
     property var pending: ({})
+    property var pendingSince: ({})
+    property int requestTimeoutMs: 30000
     property int reconnectAttempt: 0
     property bool colorSyncEnabled: false
     property alias themeOutput: themeCoordinator.output
@@ -53,6 +55,10 @@ Singleton {
         const next = Object.assign({}, root.pending)
         next[id] = method
         root.pending = next
+        const times = Object.assign({}, root.pendingSince)
+        times[id] = Date.now()
+        root.pendingSince = times
+        timeoutPoll.start()
         socket.write(JSON.stringify({ id: id, method: method, params: params ?? ({}) }) + "\n")
         socket.flush()
         return id
@@ -84,6 +90,11 @@ Singleton {
             }
             else if (message.event === "skwd.wall.outputs_changed") root.send("wall.outputs", {})
             else if (message.event === "skwd.wall.config_changed") root.send("status", {})
+            else if (message.event === "skwd.wall.ownership_changed") {
+                if (typeof message.data?.rendering_blocked === "boolean")
+                    root.rendererReleased = message.data.rendering_blocked
+                root.send("status", {})
+            }
             return
         }
         const id = Number(message.id)
@@ -92,6 +103,10 @@ Singleton {
         const next = Object.assign({}, root.pending)
         delete next[id]
         root.pending = next
+        const times = Object.assign({}, root.pendingSince)
+        delete times[id]
+        root.pendingSince = times
+        if (Object.keys(next).length === 0) timeoutPoll.stop()
         const result = message.result ?? ({})
         const error = message.error ?? null
         if (error) {
@@ -163,6 +178,8 @@ Singleton {
                 root.outputs = []
                 const lost = root.pending
                 root.pending = ({})
+                root.pendingSince = ({})
+                timeoutPoll.stop()
                 for (const id of Object.keys(lost))
                     root.requestFinished(Number(id), String(lost[id]), null, { message: "Skwd connection lost" })
                 root.disconnected()
@@ -174,6 +191,34 @@ Singleton {
         id: themeCoordinator
         enabled: root.colorSyncEnabled && root.integrationEligible
         onThemeSourceReady: (path, output, generation) => root.themeSourceReady(path, output, generation)
+    }
+    Timer {
+        id: timeoutPoll
+        interval: Math.max(20, Math.min(1000, root.requestTimeoutMs / 2))
+        repeat: true
+        onTriggered: {
+            const now = Date.now()
+            const remaining = Object.assign({}, root.pending)
+            const times = Object.assign({}, root.pendingSince)
+            const expired = []
+            for (const id of Object.keys(remaining)) {
+                if (now - Number(times[id] ?? now) < Math.max(1, root.requestTimeoutMs)) continue
+                expired.push([Number(id), String(remaining[id])])
+                delete remaining[id]
+                delete times[id]
+            }
+            root.pending = remaining
+            root.pendingSince = times
+            if (Object.keys(remaining).length === 0) timeoutPoll.stop()
+            for (const item of expired) {
+                if (item[1] === "status" && item[0] === root.newestStatusRequest) {
+                    root.protocolReady = false
+                    root.rendererReleased = true
+                }
+                root.lastError = "Skwd request timed out"
+                root.requestFinished(item[0], item[1], null, { message: root.lastError })
+            }
+        }
     }
     Timer {
         id: reconnect
