@@ -11,6 +11,49 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class HandoffTest(unittest.TestCase):
+    def test_late_native_pause_must_finish_before_resume(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-handoff-late-pause-") as temp:
+            base = Path(temp)
+            (base / "runtime").mkdir(mode=0o700)
+            shutil.copy(ROOT / "services/SkwdHandoff.qml", base / "SkwdHandoff.qml")
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+    id: root
+    property int releaseCount: 0
+    property bool lateFinished: false
+    SkwdHandoff {
+        id: handoff
+        timeoutMs: 60
+        onReleaseRequested: id => {
+            root.releaseCount++
+            handoff.complete(id, handoff.phase, true, {token: "fresh"})
+        }
+        onPauseNativeRequested: id => { late.operation = id; late.start() }
+        onPhaseChanged: if (handoff.phase === "blocked") handoff.request("native")
+        onResumeNativeRequested: id => {
+            if (!root.lateFinished || root.releaseCount !== 2) { Qt.exit(1); return }
+            handoff.complete(id, "resume-native", true, {})
+            console.log("LATE_PAUSE_OK"); Qt.exit(0)
+        }
+    }
+    Timer { id: late; property int operation: 0; interval: 120
+        onTriggered: { root.lateFinished = true; handoff.complete(operation, "pause-native", true, {}) }
+    }
+    Component.onCompleted: handoff.request("skwd")
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", XDG_RUNTIME_DIR=str(base / "runtime"),
+                       XDG_CONFIG_HOME=str(base / "config"), XDG_CACHE_HOME=str(base / "cache"))
+            proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"], env=env,
+                                  text=True, capture_output=True, timeout=8)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("LATE_PAUSE_OK", proc.stdout + proc.stderr)
+
     def test_timeout_during_acquire_requires_fresh_release(self):
         quickshell = shutil.which("quickshell")
         if not quickshell:
