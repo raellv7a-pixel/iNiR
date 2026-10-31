@@ -9190,5 +9190,7 @@
   "Ctrl+Tab switches pages": "Ctrl+Tab switches pages",
   "No pinned applications": "No pinned applications",
   "No applications running": "No applications running",
-  "Running apps": "Running apps"
+  "Running apps": "Running apps",
+  "Visible rows": "Visible rows",
+  "Maximum number of complete rows shown in All apps, limited by the available screen space.": "Maximum number of complete rows shown in All apps, limited by the available screen space."
 }

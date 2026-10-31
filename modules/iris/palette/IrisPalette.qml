@@ -145,6 +145,7 @@ Item {
     readonly property bool hybrid: root.options?.hybridMenu ?? true
     property bool allApps: false
     readonly property int menuColumnCount: Math.max(2, Math.min(12, Number(root.options?.columns ?? 4)))
+    readonly property int menuVisibleRows: Math.max(1, Math.min(12, Number(root.options?.visibleRows ?? 4)))
     // These lists change with the dock or catalogue, not with every search keystroke.
     function dockMenuEntry(app, focusWindow): var {
         const entry = AppSearch.lookupDesktopEntry(app.appId)
@@ -481,7 +482,15 @@ Item {
                     const y = root.fromIsland ? root.island.y - IrisFrame.band : Math.max(72, Math.round(root.height * 0.2))
                     return root.height - y - bottom
                 }
-                height: Math.min(body.implicitHeight, Math.max(1, surface.room))
+                // Keep the catalogue viewport aligned to whole rows, even on a small screen.
+                readonly property real catalogueChrome: Math.max(0, body.implicitHeight - allGrid.preferredGridHeight)
+                height: {
+                    const room = Math.max(1, surface.room)
+                    if (!(root.hybrid && root.browsing && root.allApps) || body.implicitHeight <= room)
+                        return Math.min(body.implicitHeight, room)
+                    const rows = Math.max(0, Math.floor((room - surface.catalogueChrome) / allGrid.cellHeight))
+                    return Math.min(room, surface.catalogueChrome + rows * allGrid.cellHeight)
+                }
                 onClosed: LauncherSearch.query = ""
                 onSettledChanged: if (surface.settled && surface.open) stage.focusInput()
                 Behavior on height {
@@ -894,6 +903,7 @@ Item {
                         }
                         IrisMenuGrid {
                             id: allGrid
+                            readonly property real preferredGridHeight: Math.min(implicitHeight, root.menuVisibleRows * cellHeight)
                             visible: root.allApps
                             Layout.fillWidth: true
                             Layout.fillHeight: true
@@ -901,8 +911,10 @@ Item {
                             Layout.rightMargin: 16 * stage.d
                             Layout.bottomMargin: 12 * stage.d
                             columns: root.menuColumnCount
+                            snapMode: GridView.SnapToRow
                             Layout.minimumHeight: 0
-                            Layout.maximumHeight: implicitHeight
+                            Layout.preferredHeight: preferredGridHeight
+                            Layout.maximumHeight: preferredGridHeight
                             entries: visible ? root.catalogueApps : []
                             selection: root.selectedIndex
                             onChosen: index => { root.selectedIndex = index; root.executeSelected() }

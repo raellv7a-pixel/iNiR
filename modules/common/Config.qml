@@ -4242,6 +4242,7 @@ Singleton {
                 property JsonObject palette: JsonObject {
                     property bool hybridMenu: true
                     property int columns: 4
+                    property int visibleRows: 4
                     property string appOrder: "alphabetical"
                     property string opens: "floating" // "floating" below the Island, or "island": the Island itself becomes Spotlight
                     property int width: 640

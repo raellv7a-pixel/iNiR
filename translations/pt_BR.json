@@ -9190,5 +9190,7 @@
   "Ctrl+Tab switches pages": "Ctrl+Tab alterna entre as páginas",
   "No pinned applications": "Nenhum aplicativo fixado",
   "No applications running": "Nenhum aplicativo em execução",
-  "Running apps": "Aplicativos em execução"
+  "Running apps": "Aplicativos em execução",
+  "Visible rows": "Linhas visíveis",
+  "Maximum number of complete rows shown in All apps, limited by the available screen space.": "Número máximo de linhas completas em Todos os aplicativos, limitado pelo espaço disponível na tela."
 }
