@@ -15,6 +15,46 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SkwdTransportTest(unittest.TestCase):
+    def test_snapshot_seeds_selected_monitor_without_overwriting_events(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-skwd-snapshot-") as temp:
+            base = Path(temp)
+            (base / "runtime").mkdir(mode=0o700)
+            shutil.copy(ROOT / "services/SkwdThemeCoordinator.qml", base / "SkwdThemeCoordinator.qml")
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+    SkwdThemeCoordinator {
+        id: coordinator
+        enabled: true
+        output: "DP-2"
+        settleMs: 10
+        onThemeSourceReady: (path, output, generation) => {
+            if (path === "/tmp/new.png" && output === "DP-2" && generation === 4) {
+                console.log("SKWD_SNAPSHOT_OK"); Qt.exit(0)
+            } else { console.log("SKWD_SNAPSHOT_BAD", path, output, generation); Qt.exit(1) }
+        }
+    }
+    Component.onCompleted: {
+        coordinator.seed({available: true, outputs: [
+            {output: "DP-1", theme_source: "/tmp/first.png", rendered: true},
+            {output: "DP-2", theme_source: "/tmp/previous.png", rendered: true}]})
+        coordinator.accept({output: "DP-2", theme_source: "/tmp/new.png", generation: 4, rendered: true})
+        coordinator.seed({available: true, outputs: [
+            {output: "DP-2", theme_source: "/tmp/stale.png", rendered: true}]})
+    }
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", XDG_RUNTIME_DIR=str(base / "runtime"),
+                       XDG_CONFIG_HOME=str(base / "config"), XDG_CACHE_HOME=str(base / "cache"))
+            proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"],
+                                  env=env, text=True, capture_output=True, timeout=8)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("SKWD_SNAPSHOT_OK", proc.stdout + proc.stderr)
+
     def test_late_connection_subscribe_status_and_output(self):
         quickshell = shutil.which("quickshell")
         if not quickshell:
