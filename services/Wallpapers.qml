@@ -16,6 +16,7 @@ Singleton {
     id: root
 
     signal wallpaperBlurTransitionRequested(var targetMonitors, int durationMs)
+    signal externalColorScriptFinished(bool success)
 
     readonly property bool _debugWallpaperUrls: (Quickshell.env("INIR_DEBUG_WALLPAPER_URLS") ?? "") === "1"
 
@@ -26,6 +27,7 @@ Singleton {
     property bool _queuedApplyDarkMode: Appearance.m3colors.darkmode
     property bool _queuedApplyNoSwitch: false
     property bool _queuedApplyExactSource: false
+    property bool _queuedApplyForced: false
     readonly property string backendProvider: "awww"
     readonly property bool awwwBackendEnabled: true
 
@@ -821,25 +823,39 @@ Singleton {
         applyProc.exec(command)
     }
 
-    function _queueWallpaperScript(path: string, darkMode: bool, noSwitch: bool, exactSource = false): void {
+    function _queueWallpaperScript(path: string, darkMode: bool, noSwitch: bool, exactSource = false, force = false): void {
         const normalizedPath = FileUtils.trimFileProtocol(String(path ?? ""))
         if (!normalizedPath || normalizedPath.length === 0)
             return
 
         const requestKey = root._applyRequestKey(normalizedPath, darkMode, noSwitch, exactSource)
         if (applyProc.running) {
-            if (applyProc.activeRequestKey === requestKey) {
+            if (!force && applyProc.activeRequestKey === requestKey) {
+                if (root._queuedApplyForced) {
+                    // Keep the pending settings regeneration, but retarget it
+                    // to the latest confirmed wallpaper.
+                    root._queuedApplyPath = normalizedPath
+                    root._queuedApplyDarkMode = darkMode
+                    root._queuedApplyNoSwitch = noSwitch
+                    root._queuedApplyExactSource = exactSource
+                    applyProc.pendingRequestKey = requestKey
+                    return
+                }
                 // A newer choice returned to the active source: discard an older pending one.
                 root._queuedApplyPath = ""
                 applyProc.pendingRequestKey = ""
                 return
             }
-            if (applyProc.pendingRequestKey === requestKey) return
+            if (applyProc.pendingRequestKey === requestKey) {
+                root._queuedApplyForced = root._queuedApplyForced || force
+                return
+            }
 
             root._queuedApplyPath = normalizedPath
             root._queuedApplyDarkMode = darkMode
             root._queuedApplyNoSwitch = noSwitch
             root._queuedApplyExactSource = exactSource
+            root._queuedApplyForced = root._queuedApplyForced || force
             applyProc.pendingRequestKey = requestKey
             root._applyInProgress = true
             _applySuppressTimer.restart()
@@ -847,6 +863,7 @@ Singleton {
         }
 
         root._queuedApplyPath = ""
+        root._queuedApplyForced = false
         applyProc.pendingRequestKey = ""
         root._runWallpaperScript(normalizedPath, darkMode, noSwitch, exactSource)
     }
@@ -856,16 +873,18 @@ Singleton {
         property string activeRequestKey: ""
         property string pendingRequestKey: ""
 
-        onExited: {
+        onExited: exitCode => {
             const nextKey = pendingRequestKey
             const nextPath = root._queuedApplyPath
             const nextDarkMode = root._queuedApplyDarkMode
             const nextNoSwitch = root._queuedApplyNoSwitch
             const nextExactSource = root._queuedApplyExactSource
+            const finishedExactSource = activeRequestKey.startsWith("noswitch|exact|")
 
             activeRequestKey = ""
             pendingRequestKey = ""
             root._queuedApplyPath = ""
+            root._queuedApplyForced = false
 
             if (nextKey !== "" && nextPath !== "") {
                 root._runWallpaperScript(nextPath, nextDarkMode, nextNoSwitch, nextExactSource)
@@ -873,6 +892,7 @@ Singleton {
             }
 
             root._applyInProgress = false
+            if (finishedExactSource) root.externalColorScriptFinished(exitCode === 0)
         }
     }
 

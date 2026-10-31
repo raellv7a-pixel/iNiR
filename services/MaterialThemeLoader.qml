@@ -54,14 +54,18 @@ Singleton {
         const scheme = String(Config.options?.iris?.appearance?.scheme ?? "auto")
         if ((Config.options?.panelFamily ?? "ii") === "iris" && scheme !== "auto")
             Config.setNestedValue("iris.appearance.scheme", dark ? "dark" : scheme === "ink" ? "ink" : "light")
-        if (SkwdWallpaper.nativeRenderingSuppressed && !SkwdWallpaper.confirmedThemeSource) return
+        if (SkwdWallpaper.nativeRenderingSuppressed) {
+            if (SkwdWallpaper.confirmedThemeSource) {
+                root._forceExternalRegenPending = true
+                Wallpapers._queueWallpaperScript(SkwdWallpaper.confirmedThemeSource, dark, true, true, true)
+            }
+            return
+        }
         darkModeProc.command = [
             "/usr/bin/bash",
             Directories.wallpaperSwitchScriptPath,
             "--mode", dark ? "dark" : "light",
-            "--noswitch",
-            ...(SkwdWallpaper.nativeRenderingSuppressed
-                ? ["--exact-color-source", "--image", SkwdWallpaper.confirmedThemeSource] : [])
+            "--noswitch"
         ]
         darkModeProc.running = true
     }
@@ -224,8 +228,27 @@ Singleton {
         target: Config.options?.appearance ?? null
         function onColorInvertChanged() {
             root._log("[MaterialThemeLoader] colorInvert changed, regenerating from wallpaper")
-            if (SkwdWallpaper.nativeRenderingSuppressed && !SkwdWallpaper.confirmedThemeSource) return
+            if (SkwdWallpaper.nativeRenderingSuppressed) {
+                if (SkwdWallpaper.confirmedThemeSource) {
+                    root._forceExternalRegenPending = true
+                    Wallpapers._queueWallpaperScript(SkwdWallpaper.confirmedThemeSource,
+                        Appearance.m3colors.darkmode, true, true, true)
+                }
+                return
+            }
             colorInvertProc.running = true
+        }
+    }
+
+    property bool _forceExternalRegenPending: false
+    Connections {
+        target: Wallpapers
+        function onExternalColorScriptFinished(success: bool): void {
+            if (!root._forceExternalRegenPending) return
+            root._forceExternalRegenPending = false
+            if (success) root._forceApply = true
+            root.scheduleReload()
+            delayedExternalApply.restart()
         }
     }
 
@@ -236,9 +259,7 @@ Singleton {
             "/usr/bin/bash",
             Directories.wallpaperSwitchScriptPath,
             "--noswitch",
-            "--skip-accent-write",
-            ...(SkwdWallpaper.nativeRenderingSuppressed
-                ? ["--exact-color-source", "--image", SkwdWallpaper.confirmedThemeSource] : [])
+            "--skip-accent-write"
         ]
         onExited: (code, status) => {
             if (code === 0) {
