@@ -207,3 +207,12 @@ assets/images/mascot/inir-mascot-*.gif
 # fontconfig marks every scanned font folder; assets/fonts is linked into the user fonts by sync-system-fonts.sh
 assets/fonts/**/.uuid
 assets/fonts/.uuid
+# prowl-agent: derived state
+.prowl/index.db*
+.prowl/index-refresh.lock
+.prowl/cache/
+.prowl/logs/
+.prowl/editor/
+.prowl/setup-applies.json
+.prowl-setup.lock
+# /prowl-agent: derived state
