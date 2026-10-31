@@ -4240,6 +4240,7 @@ Singleton {
                     property int hotCornerDelay: 150 // ms the pointer rests in the corner before Orbit opens
                 }
                 property JsonObject palette: JsonObject {
+                    property bool hybridMenu: true
                     property string opens: "floating" // "floating" below the Island, or "island": the Island itself becomes Spotlight
                     property int width: 640
                     property int maxResults: 8

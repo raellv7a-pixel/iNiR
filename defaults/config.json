@@ -2702,6 +2702,7 @@
         "palette": {
             "opens": "floating",
             "width": 640,
+            "hybridMenu": true,
             "maxResults": 8,
             "clipboardResults": 8,
             "showHints": true
