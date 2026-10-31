@@ -2,3 +2,4 @@ module qs.modules.iris.palette
 IrisPalette 1.0 IrisPalette.qml
 
 IrisMenuGrid 1.0 IrisMenuGrid.qml
+singleton IrisAppUsage 1.0 IrisAppUsage.qml

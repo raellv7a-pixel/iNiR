@@ -9179,5 +9179,16 @@
   "Where it shows": "Where it shows",
   "you have %1": "you have %1",
   "iRiS theme": "iRiS theme",
-  "Web app": "Web app"
+  "Web app": "Web app",
+  "Full app menu": "Full app menu",
+  "Browse apps in Spotlight; turn off for the compact launcher.": "Browse apps in Spotlight; turn off for the compact launcher.",
+  "App grid columns": "App grid columns",
+  "Number of columns in the application menu.": "Number of columns in the application menu.",
+  "App order": "App order",
+  "Most used counts launches from iRiS Spotlight on this device; other launches and open windows are not counted.": "Most used counts launches from iRiS Spotlight on this device; other launches and open windows are not counted.",
+  "Alphabetical": "Alphabetical",
+  "Ctrl+Tab switches pages": "Ctrl+Tab switches pages",
+  "No pinned applications": "No pinned applications",
+  "No applications running": "No applications running",
+  "Running apps": "Running apps"
 }

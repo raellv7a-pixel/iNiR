@@ -9179,5 +9179,16 @@
   "Where it shows": "Onde aparece",
   "you have %1": "você tem %1",
   "iRiS theme": "Tema do iRiS",
-  "Web app": "App web"
+  "Web app": "App web",
+  "Full app menu": "Menu completo de aplicativos",
+  "Browse apps in Spotlight; turn off for the compact launcher.": "Navegue pelos aplicativos no Spotlight; desative para usar o lançador compacto.",
+  "App grid columns": "Colunas da grade de aplicativos",
+  "Number of columns in the application menu.": "Número de colunas no menu de aplicativos.",
+  "App order": "Ordem dos aplicativos",
+  "Most used counts launches from iRiS Spotlight on this device; other launches and open windows are not counted.": "Mais usados conta os lançamentos pelo Spotlight da iRiS neste dispositivo; outros lançamentos e janelas abertas não são contados.",
+  "Alphabetical": "Ordem alfabética",
+  "Ctrl+Tab switches pages": "Ctrl+Tab alterna entre as páginas",
+  "No pinned applications": "Nenhum aplicativo fixado",
+  "No applications running": "Nenhum aplicativo em execução",
+  "Running apps": "Aplicativos em execução"
 }

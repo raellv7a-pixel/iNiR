@@ -222,7 +222,7 @@ Singleton {
                 comment: entry.comment ?? "",
                 runInTerminal: entry.runInTerminal ?? false,
                 genericName: entry.genericName ?? "",
-                execute: () => { AppSearch.launchEntry(entry) }
+                execute: () => AppSearch.launchEntry(entry)
             }))
         }
         result = result.concat(appResults)

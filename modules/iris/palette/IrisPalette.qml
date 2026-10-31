@@ -144,23 +144,39 @@ Item {
     readonly property bool browsing: LauncherSearch.query.length === 0
     readonly property bool hybrid: root.options?.hybridMenu ?? true
     property bool allApps: false
+    readonly property int menuColumnCount: Math.max(2, Math.min(12, Number(root.options?.columns ?? 4)))
     // These lists change with the dock or catalogue, not with every search keystroke.
     function dockMenuEntry(app, focusWindow): var {
         const entry = AppSearch.lookupDesktopEntry(app.appId)
         const windows = app.toplevels ?? []
-        return { name: entry?.name ?? app.appId, iconName: IrisPieces.appIcon(app.appId), execute: () => {
+        return { name: entry?.name ?? app.appId, iconName: IrisPieces.appIcon(app.appId), usageId: focusWindow ? "" : String(entry?.id ?? ""), execute: () => {
             const window = windows.find(item => item.activated) ?? windows[0]
             if (focusWindow && window && CompositorService.isNiri && window.niriWindowId !== undefined)
                 NiriService.focusWindow(window.niriWindowId)
             else if (focusWindow && window) window.activate()
-            else if (entry) AppSearch.launchEntry(entry)
+            else if (entry) return AppSearch.launchEntry(entry)
         } }
     }
-    readonly property var pinnedApps: IrisDockOrder.apps.filter(app => app.pinned).map(app => root.dockMenuEntry(app, false))
+    readonly property var pinnedApps: {
+        // Also depend on the catalogue: a desktop entry can arrive after the dock first builds.
+        const catalogue = AppSearch.list
+        if (catalogue.length === 0) return []
+        return Array.from(Config.options?.dock?.pinnedApps ?? []).map(id => {
+            const entry = AppSearch.lookupDesktopEntry(String(id))
+            return entry ? root.dockMenuEntry({ appId: String(id), toplevels: [] }, false) : null
+        }).filter(Boolean)
+    }
     readonly property var runningApps: IrisDockOrder.running.map(app => root.dockMenuEntry(app, true))
-    readonly property var catalogueApps: AppSearch.list.map(entry => ({
-        name: entry.name, iconName: entry.icon, execute: () => AppSearch.launchEntry(entry)
-    }))
+    readonly property var catalogueApps: {
+        const entries = AppSearch.list
+        const frequent = String(root.options?.appOrder ?? "alphabetical") === "frequency"
+        const counts = frequent ? IrisAppUsage.counts : ({})
+        const sorted = frequent ? entries.slice().sort((a, b) =>
+            (Number(counts[b.id]) || 0) - (Number(counts[a.id]) || 0) || a.name.localeCompare(b.name)) : entries
+        return sorted.map(entry => ({
+            name: entry.name, iconName: entry.icon, usageId: String(entry.id ?? ""), execute: () => AppSearch.launchEntry(entry)
+        }))
+    }
     readonly property var menuApps: root.allApps ? root.catalogueApps : root.pinnedApps.concat(root.runningApps)
     readonly property var suggestions: {
         return IrisDockOrder.entries.filter(app => app.appId !== "SEPARATOR").slice(0, 8).map(app => {
@@ -266,7 +282,9 @@ Item {
     function executeSelected(): void {
         const entry = root.visibleResults[root.selectedIndex]
         if (!entry || typeof entry.execute !== "function") return
-        entry.execute()
+        const result = entry.execute()
+        const usageId = entry.usageId ?? (!root.browsing && entry.type === Translation.tr("App") ? entry.id : "")
+        if (result === true && usageId) IrisAppUsage.record(String(usageId))
         if (!entry.keepOpen) GlobalStates.searchOpen = false
     }
 
@@ -445,13 +463,13 @@ Item {
                 light: root.fromIsland ? "transparent" : IrisStyle.surfaceLight("spotlight", IrisStyle.wallpaperLight)
                 lightFrom: IrisFrame.islandEdge
                 radius: IrisStyle.surfaceRadius("spotlight", IrisStyle.radiusPanel)
-                width: Math.max(320, Math.min(root.width - 32, Math.max(root.hybrid ? 720 : 480, Number(root.options?.width ?? 640) * stage.d)))
+                width: Math.max(1, Math.min(root.width - 16, Math.max(root.hybrid ? (root.menuColumnCount * 90 + 32) * stage.d : 480 * stage.d, Number(root.options?.width ?? 640) * stage.d)))
                 x: !root.fromIsland ? (root.width - width) / 2
                     : root.islandSide === "left" ? Math.round(root.island.x - IrisFrame.band)
                     : root.islandSide === "right" ? Math.round(root.island.x - IrisFrame.band + root.island.width - width)
                     : Math.round(Math.max(8, Math.min(root.width - width - 8, root.island.x - IrisFrame.band + root.island.width / 2 - width / 2)))
                 y: !root.fromIsland ? Math.max(72, Math.round(root.height * 0.2))
-                    : root.islandSide.length > 0 ? Math.round(Math.max(8, Math.min(root.height - height - 8,
+                    : root.islandSide.length > 0 ? Math.round(Math.max(root.edgeClear("top"), Math.min(root.height - height - root.edgeClear("bottom"),
                         root.island.y - IrisFrame.band + root.island.height / 2 - height / 2)))
                     : root.islandBottom ? Math.round(root.island.y - IrisFrame.band + root.island.height - height)
                     : Math.round(root.island.y - IrisFrame.band)
@@ -463,7 +481,7 @@ Item {
                     const y = root.fromIsland ? root.island.y - IrisFrame.band : Math.max(72, Math.round(root.height * 0.2))
                     return root.height - y - bottom
                 }
-                height: Math.min(body.implicitHeight, Math.max(Math.round(160 * stage.d), surface.room))
+                height: Math.min(body.implicitHeight, Math.max(1, surface.room))
                 onClosed: LauncherSearch.query = ""
                 onSettledChanged: if (surface.settled && surface.open) stage.focusInput()
                 Behavior on height {
@@ -793,8 +811,8 @@ Item {
                         Layout.row: body.fieldLast ? 1 : 2
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        Layout.minimumHeight: Math.round(160 * stage.d)
-                        implicitHeight: Math.round(510 * stage.d)
+                        Layout.minimumHeight: 0
+                        Layout.preferredHeight: hybridBrowse.implicitHeight
                         visible: root.browsing && root.hybrid
                         spacing: 4 * stage.d
                         RowLayout {
@@ -817,7 +835,7 @@ Item {
                         IrisText {
                             visible: !root.allApps
                             Layout.leftMargin: 24 * stage.d
-                            text: Translation.tr("Pinned")
+                            text: Translation.tr("Pinned apps")
                             color: IrisStyle.muted
                             font.pixelSize: IrisStyle.typeMeta
                         }
@@ -828,15 +846,25 @@ Item {
                             Layout.fillHeight: true
                             Layout.leftMargin: 16 * stage.d
                             Layout.rightMargin: 16 * stage.d
+                            columns: root.menuColumnCount
+                            Layout.minimumHeight: 0
+                            Layout.maximumHeight: implicitHeight
                             entries: visible ? root.pinnedApps : []
                             selection: root.selectedIndex < root.pinnedApps.length ? root.selectedIndex : -1
                             onChosen: index => { root.selectedIndex = index; root.executeSelected() }
                             onPointed: (index, area, event) => { if (root.armPointerSelection(area, event)) root.selectedIndex = index }
                         }
                         IrisText {
+                            visible: !root.allApps && root.pinnedApps.length === 0
+                            Layout.leftMargin: 24 * stage.d
+                            text: Translation.tr("No pinned applications")
+                            color: IrisStyle.muted
+                            font.pixelSize: IrisStyle.typeFootnote
+                        }
+                        IrisText {
                             visible: !root.allApps
                             Layout.leftMargin: 24 * stage.d
-                            text: Translation.tr("Running")
+                            text: Translation.tr("Running apps")
                             color: IrisStyle.muted
                             font.pixelSize: IrisStyle.typeMeta
                         }
@@ -848,10 +876,21 @@ Item {
                             Layout.leftMargin: 16 * stage.d
                             Layout.rightMargin: 16 * stage.d
                             Layout.bottomMargin: 12 * stage.d
+                            columns: root.menuColumnCount
+                            Layout.minimumHeight: 0
+                            Layout.maximumHeight: implicitHeight
                             entries: visible ? root.runningApps : []
                             selection: root.selectedIndex >= root.pinnedApps.length ? root.selectedIndex - root.pinnedApps.length : -1
                             onChosen: index => { root.selectedIndex = root.pinnedApps.length + index; root.executeSelected() }
                             onPointed: (index, area, event) => { if (root.armPointerSelection(area, event)) root.selectedIndex = root.pinnedApps.length + index }
+                        }
+                        IrisText {
+                            visible: !root.allApps && root.runningApps.length === 0
+                            Layout.leftMargin: 24 * stage.d
+                            Layout.bottomMargin: 12 * stage.d
+                            text: Translation.tr("No applications running")
+                            color: IrisStyle.muted
+                            font.pixelSize: IrisStyle.typeFootnote
                         }
                         IrisMenuGrid {
                             id: allGrid
@@ -861,6 +900,9 @@ Item {
                             Layout.leftMargin: 16 * stage.d
                             Layout.rightMargin: 16 * stage.d
                             Layout.bottomMargin: 12 * stage.d
+                            columns: root.menuColumnCount
+                            Layout.minimumHeight: 0
+                            Layout.maximumHeight: implicitHeight
                             entries: visible ? root.catalogueApps : []
                             selection: root.selectedIndex
                             onChosen: index => { root.selectedIndex = index; root.executeSelected() }

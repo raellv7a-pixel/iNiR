@@ -14,7 +14,8 @@ GridView {
     signal chosen(int index)
     signal pointed(int index, var area, var event)
     readonly property real d: IrisStyle.density
-    readonly property int columns: Math.max(1, Math.floor(width / (110 * d)))
+    property int columns: 4
+    implicitHeight: Math.ceil(entries.length / Math.max(1, columns)) * cellHeight
     cellWidth: width / columns
     cellHeight: 100 * d
     model: entries
@@ -48,7 +49,7 @@ GridView {
             y: 8 * grid.d
             icon: tile.modelData.iconName
             fallback: "application-x-executable"
-            iconSize: Math.round(42 * grid.d)
+            iconSize: Math.round(Math.min(42 * grid.d, Math.max(20 * grid.d, grid.cellWidth - 12 * grid.d)))
         }
         IrisText {
             anchors.top: icon.bottom

@@ -2703,6 +2703,8 @@
             "opens": "floating",
             "width": 640,
             "hybridMenu": true,
+            "columns": 4,
+            "appOrder": "alphabetical",
             "maxResults": 8,
             "clipboardResults": 8,
             "showHints": true
