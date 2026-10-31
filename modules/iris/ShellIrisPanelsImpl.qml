@@ -144,10 +144,18 @@ Item {
     }
 
     LazyLoader {
+        id: nativeBackdropLoader
         activeAsync: Config.ready && IrisGate.official && GlobalStates.deferredPanelsReady
             && CompositorService.isNiri
+            && !SkwdWallpaper.nativeRenderingSuppressed
             && (Config.options?.background?.backdrop?.enable ?? false)
         source: "../background/Backdrop.qml"
+    }
+
+    Binding {
+        target: SkwdWallpaper
+        property: "nativeBackdropStopped"
+        value: nativeBackdropLoader.item === null
     }
 
     LazyLoader {

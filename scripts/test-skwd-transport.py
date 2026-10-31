@@ -15,6 +15,109 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class SkwdTransportTest(unittest.TestCase):
+    def test_handoff_over_socket_waits_for_both_outputs(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-skwd-handoff-socket-") as temp:
+            base = Path(temp)
+            module = base / "testbridge"
+            module.mkdir()
+            (base / "runtime").mkdir(mode=0o700)
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
+            for name in ("SkwdWallpaper.qml", "SkwdThemeCoordinator.qml", "SkwdHandoff.qml"):
+                shutil.copy(ROOT / "services" / name, module / name)
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+import testbridge
+ShellRoot {
+    property bool started: false
+    property bool wentSkwd: false
+    Connections {
+        target: SkwdWallpaper
+        function onIntegrationCompatibleChanged() {
+            if (!started && SkwdWallpaper.integrationCompatible) {
+                started = true
+                if (SkwdWallpaper.requestOwnership("skwd", ["DP-1", "DP-2"])) { Qt.exit(1); return }
+                SkwdWallpaper.nativeAdapterAvailable = true
+                SkwdWallpaper.nativeBaselineVerified = true
+                if (!SkwdWallpaper.requestOwnership("skwd", ["DP-1", "DP-2"])) Qt.exit(1)
+            }
+        }
+        function onNativePauseRequested(id) { SkwdWallpaper.nativePauseFinished(id, true) }
+        function onNativeResumeRequested(id) { SkwdWallpaper.nativeResumeFinished(id, true) }
+        function onHandoffPhaseChanged() {
+            if (SkwdWallpaper.handoffPhase === "skwd") {
+                wentSkwd = true
+                if (!SkwdWallpaper.applySelection("/tmp/selected.png", "DP-2", false)) Qt.exit(1)
+            } else if (wentSkwd && SkwdWallpaper.handoffPhase === "native") {
+                console.log("SKWD_HANDOFF_SOCKET_OK"); Qt.exit(0)
+            }
+        }
+        function onRequestFinished(id, method, result, error) {
+            if (method === "wall.apply") {
+                if (error) { Qt.exit(1); return }
+                SkwdWallpaper.requestOwnership("native", ["DP-1", "DP-2"])
+            }
+        }
+        function onHandoffFailed(message) { console.log("HANDOFF_FAILED", message); Qt.exit(1) }
+    }
+    Component.onCompleted: {
+        SkwdWallpaper.enabled = true
+    }
+    Timer { interval: 4000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            sockpath = base / "wall.sock"
+            failures = []
+            with socket.socket(socket.AF_UNIX) as listener:
+                listener.bind(str(sockpath))
+                listener.listen(1)
+                def server():
+                    try:
+                        conn, _ = listener.accept()
+                        with conn, conn.makefile("rwb", buffering=0) as stream:
+                            releases = 0
+                            for line in stream:
+                                req = json.loads(line)
+                                method = req["method"]
+                                if method == "integration.release":
+                                    releases += 1
+                                    result = {"released": True, "token": "token-" + str(releases)}
+                                elif method == "integration.acquire":
+                                    assert req["params"]["token"] == "token-1", req
+                                    result = {"claimed": True, "rendered": False}
+                                elif method == "wall.apply":
+                                    assert req["params"]["path"] == "/tmp/selected.png", req
+                                    assert req["params"]["output"] == "DP-2", req
+                                    assert req["params"]["type"] == "static", req
+                                    result = {"ok": True}
+                                elif method == "integration.snapshot":
+                                    result = {"available": True, "outputs": [
+                                        {"output": "DP-1", "rendered": True},
+                                        {"output": "DP-2", "rendered": True}]}
+                                elif method == "subscribe": result = {"subscribed": True}
+                                elif method == "status":
+                                    result = {"protocol": {"name": "skwd-wall", "version": 1},
+                                              "theme_authority": "inir", "pick_only": False,
+                                              "renderer_released": False,
+                                              "integration_features": ["inir-theme-authority-v1", "output-theme-source-v1", "renderer-handoff-v1", "rendered-snapshot-v1"]}
+                                else: result = {"outputs": []}
+                                stream.write((json.dumps({"id": req["id"], "result": result}) + "\n").encode())
+                    except Exception as error:
+                        failures.append(error)
+                thread = threading.Thread(target=server, daemon=True)
+                thread.start()
+                env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QML_IMPORT_PATH=str(base),
+                           XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                           XDG_CACHE_HOME=str(base / "cache"), SKWD_WALL_V2_SOCK=str(sockpath))
+                proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"],
+                                      env=env, text=True, capture_output=True, timeout=8)
+                thread.join(timeout=2)
+                self.assertFalse(failures, str(failures))
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                self.assertIn("SKWD_HANDOFF_SOCKET_OK", proc.stdout + proc.stderr)
+
     def test_unresponsive_request_times_out(self):
         quickshell = shutil.which("quickshell")
         if not quickshell:
@@ -24,9 +127,10 @@ class SkwdTransportTest(unittest.TestCase):
             module = base / "testbridge"
             module.mkdir()
             (base / "runtime").mkdir(mode=0o700)
-            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\n")
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
             shutil.copy(ROOT / "services/SkwdWallpaper.qml", module / "SkwdWallpaper.qml")
             shutil.copy(ROOT / "services/SkwdThemeCoordinator.qml", module / "SkwdThemeCoordinator.qml")
+            shutil.copy(ROOT / "services/SkwdHandoff.qml", module / "SkwdHandoff.qml")
             (base / "shell.qml").write_text('''import QtQuick
 import Quickshell
 import testbridge
@@ -116,9 +220,10 @@ ShellRoot {
             module = base / "testbridge"
             module.mkdir()
             (base / "runtime").mkdir(mode=0o700)
-            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\n")
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
             shutil.copy(ROOT / "services/SkwdWallpaper.qml", module / "SkwdWallpaper.qml")
             shutil.copy(ROOT / "services/SkwdThemeCoordinator.qml", module / "SkwdThemeCoordinator.qml")
+            shutil.copy(ROOT / "services/SkwdHandoff.qml", module / "SkwdHandoff.qml")
             (base / "shell.qml").write_text('''import QtQuick
 import Quickshell
 import testbridge

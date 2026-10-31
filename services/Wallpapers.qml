@@ -50,6 +50,7 @@ Singleton {
     readonly property bool internalPreviewActive: internalPreviewPath.length > 0
 
     function previewWallpaper(path: string, monitorName = ""): void {
+        if (SkwdWallpaper.nativeRenderingSuppressed) return
         const normalizedPath = FileUtils.trimFileProtocol(String(path ?? ""))
         if (!normalizedPath) {
             root.cancelWallpaperPreview()
@@ -278,6 +279,8 @@ Singleton {
     readonly property bool useBackdropForColors: Config.options?.appearance?.wallpaperTheming?.useBackdropForColors ?? false
 
     function currentThemingWallpaperPath(monitorName = ""): string {
+        if (SkwdWallpaper.nativeRenderingSuppressed && SkwdWallpaper.colorSyncEnabled)
+            return SkwdWallpaper.confirmedThemeSource
         const targetMonitor = monitorName || (WallpaperListener.multiMonitorEnabled ? WallpaperListener.getFocusedMonitor() : "")
         const mainPath = currentMainWallpaperPath(targetMonitor)
         const waffleMainPath = currentWaffleWallpaperPath(targetMonitor)
@@ -885,10 +888,15 @@ Singleton {
     }
 
     function openFallbackPicker(darkMode = Appearance.m3colors.darkmode) {
+        if (SkwdWallpaper.nativeRenderingSuppressed) return
         applyProc.exec([Directories.wallpaperSwitchScriptPath, "--mode", (darkMode ? "dark" : "light")])
     }
 
     function applySelectionTarget(path, target = "main", darkMode = Appearance.m3colors.darkmode, monitorName = "") {
+        if (SkwdWallpaper.nativeRenderingSuppressed) {
+            if (!target || target === "main") root.apply(path, darkMode, monitorName)
+            return
+        }
         const normalizedPath = FileUtils.trimFileProtocol(String(path ?? ""))
         if (!normalizedPath || normalizedPath.length === 0) return
 
@@ -956,6 +964,10 @@ Singleton {
     function apply(path, darkMode = Appearance.m3colors.darkmode, monitorName = "") {
         const normalizedPath = FileUtils.trimFileProtocol(String(path ?? ""))
         if (!normalizedPath || normalizedPath.length === 0) return
+        if (SkwdWallpaper.nativeRenderingSuppressed) {
+            SkwdWallpaper.applySelection(normalizedPath, monitorName, root.isVideoFile(normalizedPath))
+            return
+        }
 
         const adoptedPreview = root._adoptVisiblePreview(normalizedPath, monitorName)
         if (!adoptedPreview)

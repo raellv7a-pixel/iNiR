@@ -41,11 +41,84 @@ Singleton {
     property int reconnectAttempt: 0
     property bool colorSyncEnabled: false
     property alias themeOutput: themeCoordinator.output
+    property string confirmedThemeSource: ""
+    // The shell must install a native-renderer adapter and establish its
+    // baseline before ownership changes can be requested.
+    property bool nativeAdapterAvailable: false
+    property bool nativeBaselineVerified: false
+    // Set only by the native adapter while it is relinquishing ownership.
+    property bool nativeRenderingSuppressed: false
+    property bool nativeBackdropStopped: false
+    readonly property alias handoffPhase: handoff.phase
+    property var handoffRequests: ({})
 
     signal wallpaperApplied(var data)
     signal themeSourceReady(string path, string output, double generation)
     signal requestFinished(int id, string method, var result, var error)
     signal disconnected()
+    signal nativePauseRequested(int id)
+    signal nativeResumeRequested(int id)
+    signal handoffFailed(string message)
+
+    function requestOwnership(mode: string, outputs: var): bool {
+        if (!root.nativeAdapterAvailable || !root.nativeBaselineVerified) return false
+        // Always accept a request to return to native mode. If the socket is
+        // unavailable the coordinator remains blocked and retries after reconnect.
+        if (mode === "native") {
+            handoff.expectedOutputs = Array.from(outputs ?? [])
+            handoff.request(mode)
+            return true
+        }
+        if (mode !== "skwd" || !root.integrationCompatible
+                || root.themeAuthority !== "inir" || root.pickOnly
+                || !root.capabilities.includes("renderer-handoff-v1")
+                || !root.capabilities.includes("rendered-snapshot-v1")) return false
+        handoff.expectedOutputs = Array.from(outputs ?? [])
+        handoff.request(mode)
+        return true
+    }
+
+    function updateOwnershipOutputs(outputs: var): void {
+        handoff.expectedOutputs = Array.from(outputs ?? [])
+    }
+
+    function sendHandoff(method: string, params: var, operationId: int, action: string): void {
+        const id = root.send(method, params)
+        if (!id) {
+            handoff.complete(operationId, action, false, { message: "Skwd is disconnected" })
+            return
+        }
+        const next = Object.assign({}, root.handoffRequests)
+        next[id] = { operationId: operationId, action: action }
+        root.handoffRequests = next
+    }
+
+    function finishHandoffRequest(id: int, method: string, result: var, error: var): void {
+        const request = root.handoffRequests[id]
+        if (!request) return
+        const next = Object.assign({}, root.handoffRequests)
+        delete next[id]
+        root.handoffRequests = next
+        const ok = !error && (method === "integration.release" ? result?.released === true
+            : method === "integration.acquire" && result?.claimed === true)
+        handoff.complete(request.operationId, request.action, ok, error ?? result)
+    }
+
+    function nativePauseFinished(id: int, ok: bool, message = ""): void {
+        handoff.complete(id, "pause-native", ok, {message: message})
+    }
+
+    function nativeResumeFinished(id: int, ok: bool, message = ""): void {
+        handoff.complete(id, "resume-native", ok, {message: message})
+    }
+
+    function applySelection(path: string, output: string, isVideo: bool): bool {
+        if (handoff.phase !== "skwd" || !root.integrationEligible || !path) return false
+        return root.send("wall.apply", {
+            type: isVideo ? "video" : "static", path: path,
+            output: output || "*", source: "user"
+        }) !== 0
+    }
 
     function send(method: string, params: var): int {
         if (!socket.connected) return 0
@@ -78,6 +151,10 @@ Singleton {
 
     onIntegrationEligibleChanged: if (root.integrationEligible) root.reconcile()
     onColorSyncEnabledChanged: if (root.colorSyncEnabled) root.reconcile()
+    onReadyChanged: if (root.ready && handoff.phase === "blocked" && handoff.desired === "native")
+        handoff.request("native")
+    onThemeOutputChanged: root.confirmedThemeSource = ""
+    onNativeRenderingSuppressedChanged: if (!root.nativeRenderingSuppressed) root.confirmedThemeSource = ""
 
     function handleLine(line: string): void {
         let message
@@ -87,8 +164,13 @@ Singleton {
             if (message.event === "skwd.wall.applied") {
                 themeCoordinator.accept(message.data ?? ({}))
                 root.wallpaperApplied(message.data ?? ({}))
+                if (handoff.phase === "waiting-ready" && message.data?.rendered === true)
+                    root.send("integration.snapshot", {})
             }
-            else if (message.event === "skwd.wall.outputs_changed") root.send("wall.outputs", {})
+            else if (message.event === "skwd.wall.outputs_changed") {
+                root.send("wall.outputs", {})
+                if (handoff.phase === "waiting-ready") root.send("integration.snapshot", {})
+            }
             else if (message.event === "skwd.wall.config_changed") root.send("status", {})
             else if (message.event === "skwd.wall.ownership_changed") {
                 if (typeof message.data?.rendering_blocked === "boolean")
@@ -131,6 +213,9 @@ Singleton {
             root.outputs = Array.isArray(result.outputs) ? result.outputs : []
         } else if (method === "integration.snapshot") {
             themeCoordinator.seed(result)
+            if (result.available === true && Array.isArray(result.outputs))
+                for (const item of result.outputs)
+                    if (item?.rendered === true) handoff.confirmReady(String(item.output ?? ""))
         } else if (method === "integration.release" && result.released === true) {
             root.rendererReleased = true
         } else if (method === "integration.acquire" && result.claimed === true) {
@@ -138,6 +223,7 @@ Singleton {
             root.rendererReleased = false
             root.refresh()
         }
+        root.finishHandoffRequest(id, method, result, error)
         root.requestFinished(id, method, result, error)
     }
 
@@ -180,8 +266,10 @@ Singleton {
                 root.pending = ({})
                 root.pendingSince = ({})
                 timeoutPoll.stop()
-                for (const id of Object.keys(lost))
+                for (const id of Object.keys(lost)) {
+                    root.finishHandoffRequest(Number(id), String(lost[id]), null, { message: "Skwd connection lost" })
                     root.requestFinished(Number(id), String(lost[id]), null, { message: "Skwd connection lost" })
+                }
                 root.disconnected()
                 root.scheduleReconnect()
             }
@@ -190,7 +278,19 @@ Singleton {
     SkwdThemeCoordinator {
         id: themeCoordinator
         enabled: root.colorSyncEnabled && root.integrationEligible
-        onThemeSourceReady: (path, output, generation) => root.themeSourceReady(path, output, generation)
+        onThemeSourceReady: (path, output, generation) => {
+            root.confirmedThemeSource = path
+            root.themeSourceReady(path, output, generation)
+        }
+    }
+    SkwdHandoff {
+        id: handoff
+        onReleaseRequested: id => root.sendHandoff("integration.release", {}, id, handoff.phase)
+        onAcquireRequested: (id, token) => root.sendHandoff("integration.acquire", {token: token}, id, "acquire-skwd")
+        onPauseNativeRequested: id => root.nativePauseRequested(id)
+        onResumeNativeRequested: id => root.nativeResumeRequested(id)
+        onFailed: message => root.handoffFailed(message)
+        onPhaseChanged: if (handoff.phase === "waiting-ready") root.send("integration.snapshot", {})
     }
     Timer {
         id: timeoutPoll
@@ -216,6 +316,7 @@ Singleton {
                     root.rendererReleased = true
                 }
                 root.lastError = "Skwd request timed out"
+                root.finishHandoffRequest(item[0], item[1], null, { message: root.lastError })
                 root.requestFinished(item[0], item[1], null, { message: root.lastError })
             }
         }

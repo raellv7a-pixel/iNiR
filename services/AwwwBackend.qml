@@ -14,6 +14,7 @@ Singleton {
 
     readonly property string provider: "awww"
     readonly property bool enabled: (Config.options?.background?.backend?.provider ?? "awww") === provider
+        && !SkwdWallpaper.nativeRenderingSuppressed
     readonly property int transitionFps: Config.options?.background?.backend?.awww?.transitionFps ?? 60
     readonly property int simpleStep: Config.options?.background?.backend?.awww?.simpleStep ?? 5
     readonly property int spatialStep: Config.options?.background?.backend?.awww?.spatialStep ?? 30
@@ -45,6 +46,7 @@ Singleton {
     property bool warnedMissing: false
     property bool stoppedForNoOutputs: false
     property bool _queuedStopAfterApply: false
+    property int _externalPauseId: 0
     // Internal shaders are only a transient QML overlay. While a configured
     // target is being painted underneath, keep that overlay alive so it never
     // reveals the previous awww image at the end of the effect.
@@ -93,6 +95,7 @@ Singleton {
     }
 
     function _drainPreviewQueue(): void {
+        if (SkwdWallpaper.nativeRenderingSuppressed) return
         if ((!root.previewActive && !root._adoptPreviewPending)
                 || previewProc.running || stopProc.running)
             return
@@ -448,6 +451,8 @@ Singleton {
     }
 
     function _syncNow(): void {
+        // The external handoff owns shutdown while the native renderer is suspended.
+        if (SkwdWallpaper.nativeRenderingSuppressed) return
         if (!enabled) {
             if (stopProc.running)
                 return
@@ -643,6 +648,89 @@ Singleton {
             root.shaderHandoffPending = false
             root._drainPreviewQueue()
         }
+    }
+
+    function pauseForExternal(id: int): void {
+        if ((Config.options?.background?.backend?.provider ?? "awww") !== "awww" || root._externalPauseId) {
+            SkwdWallpaper.nativePauseFinished(id, false, "Native wallpaper backend is not available for handoff")
+            return
+        }
+        root._externalPauseId = id
+        SkwdWallpaper.nativeRenderingSuppressed = true
+        syncDebounce.stop()
+        root.previewActive = false
+        root._clearPreviewQueue()
+        root._clearPreviewAdoption()
+        root._restoreAfterPreviewExit = false
+        root._queuedStopAfterApply = false
+        applyProc._queuedSignature = ""
+        applyProc._queuedCommand = []
+        externalPauseWait.restart()
+    }
+
+    function resumeFromExternal(id: int): void {
+        if (root._externalPauseId || externalStopProc.running) {
+            SkwdWallpaper.nativeResumeFinished(id, false, "Native wallpaper shutdown is still running")
+            return
+        }
+        SkwdWallpaper.nativeRenderingSuppressed = false
+        root.lastSyncSignature = ""
+        root.forceSync()
+        SkwdWallpaper.nativeResumeFinished(id, true)
+    }
+
+    Timer {
+        id: externalPauseWait
+        interval: 80
+        repeat: true
+        onTriggered: {
+            if (!root._externalPauseId) { stop(); return }
+            if (applyProc.running || previewProc.running || stopProc.running || Wallpapers._applyInProgress
+                    || !SkwdWallpaper.nativeBackdropStopped) return
+            stop()
+            externalStopProc.running = true
+        }
+    }
+
+    Process {
+        id: externalStopProc
+        command: ["/usr/bin/bash", "-lc", `
+            [ -n "\${WAYLAND_DISPLAY:-}" ] && [ -n "\${XDG_RUNTIME_DIR:-}" ] || exit 1
+            command -v grep >/dev/null 2>&1 && command -v cat >/dev/null 2>&1 || exit 1
+            client=$(command -v awww 2>/dev/null || true)
+            if [ -n "$client" ] && "$client" query >/dev/null 2>&1; then
+                "$client" kill >/dev/null 2>&1 || exit 1
+            fi
+            session_daemon_alive() {
+                for proc in /proc/[0-9]*; do
+                    [ -O "$proc" ] || continue
+                    [ "$(cat "$proc/comm" 2>/dev/null)" = "awww-daemon" ] || continue
+                    [ -r "$proc/environ" ] || return 0
+                    if grep -zFxq "WAYLAND_DISPLAY=\${WAYLAND_DISPLAY:-}" "$proc/environ" &&
+                       grep -zFxq "XDG_RUNTIME_DIR=\${XDG_RUNTIME_DIR:-}" "$proc/environ"; then
+                        return 0
+                    fi
+                done
+                return 1
+            }
+            for _ in 1 2 3 4 5 6 7 8 9 10; do
+                if { [ -z "$client" ] || ! "$client" query >/dev/null 2>&1; } && ! session_daemon_alive; then exit 0; fi
+                sleep 0.1
+            done
+            exit 1
+        `]
+        onExited: exitCode => {
+            const id = root._externalPauseId
+            root._externalPauseId = 0
+            if (id) SkwdWallpaper.nativePauseFinished(id, exitCode === 0,
+                exitCode === 0 ? "" : "Could not confirm that Awww stopped")
+        }
+    }
+
+    Connections {
+        target: SkwdWallpaper
+        function onNativePauseRequested(id: int): void { root.pauseForExternal(id) }
+        function onNativeResumeRequested(id: int): void { root.resumeFromExternal(id) }
     }
 
     Timer {

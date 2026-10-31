@@ -255,6 +255,12 @@ Singleton {
 
     function regenerateAutoTheme(): void {
         root._log("[ThemeService] regenerateAutoTheme called");
+        // In external-renderer mode, wait for a confirmed image and serialize
+        // every regeneration with wallpaper events. Never fall back to the old
+        // native path or let the color script stop the external renderer.
+        const externalTheme = SkwdWallpaper.nativeRenderingSuppressed
+        if (isAutoTheme && externalTheme
+                && (!SkwdWallpaper.colorSyncEnabled || !SkwdWallpaper.confirmedThemeSource)) return
         const now = Date.now()
         const elapsed = now - root._lastRegenTimestamp
         if (elapsed < root._regenCooldownMs) {
@@ -275,6 +281,11 @@ Singleton {
         regenCooldownTimer.stop()
         root._lastRegenTimestamp = now
         if (isAutoTheme) {
+            if (externalTheme) {
+                Wallpapers._queueWallpaperScript(SkwdWallpaper.confirmedThemeSource,
+                    Appearance.m3colors.darkmode, true, true)
+                return
+            }
             // Force full regeneration from wallpaper (includes terminals, GTK, etc)
             const themingPath = Wallpapers.currentThemingWallpaperPath()
             const paletteType = Config.options?.appearance?.palette?.type ?? "auto"

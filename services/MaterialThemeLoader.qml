@@ -54,11 +54,14 @@ Singleton {
         const scheme = String(Config.options?.iris?.appearance?.scheme ?? "auto")
         if ((Config.options?.panelFamily ?? "ii") === "iris" && scheme !== "auto")
             Config.setNestedValue("iris.appearance.scheme", dark ? "dark" : scheme === "ink" ? "ink" : "light")
+        if (SkwdWallpaper.nativeRenderingSuppressed && !SkwdWallpaper.confirmedThemeSource) return
         darkModeProc.command = [
             "/usr/bin/bash",
             Directories.wallpaperSwitchScriptPath,
             "--mode", dark ? "dark" : "light",
-            "--noswitch"
+            "--noswitch",
+            ...(SkwdWallpaper.nativeRenderingSuppressed
+                ? ["--exact-color-source", "--image", SkwdWallpaper.confirmedThemeSource] : [])
         ]
         darkModeProc.running = true
     }
@@ -221,6 +224,7 @@ Singleton {
         target: Config.options?.appearance ?? null
         function onColorInvertChanged() {
             root._log("[MaterialThemeLoader] colorInvert changed, regenerating from wallpaper")
+            if (SkwdWallpaper.nativeRenderingSuppressed && !SkwdWallpaper.confirmedThemeSource) return
             colorInvertProc.running = true
         }
     }
@@ -232,7 +236,9 @@ Singleton {
             "/usr/bin/bash",
             Directories.wallpaperSwitchScriptPath,
             "--noswitch",
-            "--skip-accent-write"
+            "--skip-accent-write",
+            ...(SkwdWallpaper.nativeRenderingSuppressed
+                ? ["--exact-color-source", "--image", SkwdWallpaper.confirmedThemeSource] : [])
         ]
         onExited: (code, status) => {
             if (code === 0) {

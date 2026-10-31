@@ -53,13 +53,14 @@ Variants {
         Rectangle {
             anchors.fill: parent
             color: "black" // iris-literal: letterbox bars, the same black awww pads with
-            visible: (panel.fillMode === "fit" || panel.fillMode === "center")
+            visible: !SkwdWallpaper.nativeRenderingSuppressed && (panel.fillMode === "fit" || panel.fillMode === "center")
                 && !panel.externalWallpaper && panel.effectivePath.length > 0
         }
 
         // Span: this output's slice of one picture laid across the box around every screen.
         Item {
             id: canvas
+            visible: !SkwdWallpaper.nativeRenderingSuppressed
             x: panel.spanning ? Wallpapers.spanArea.x - panel.modelData.x : 0
             y: panel.spanning ? Wallpapers.spanArea.y - panel.modelData.y : 0
             width: panel.spanning ? Wallpapers.spanArea.width : parent.width
@@ -86,7 +87,7 @@ Variants {
             AnimatedImage {
                 anchors.fill: parent
                 visible: panel.gif && status === AnimatedImage.Ready
-                source: panel.gif ? "file://" + FileUtils.trimFileProtocol(panel.previewPath) : ""
+                source: panel.gif && !SkwdWallpaper.nativeRenderingSuppressed ? "file://" + FileUtils.trimFileProtocol(panel.previewPath) : ""
                 fillMode: Wallpapers.imageFillFor(panel.fillMode)
                 asynchronous: true
                 cache: false
@@ -96,7 +97,7 @@ Variants {
             VideoCrossfader {
                 anchors.fill: parent
                 visible: panel.video
-                source: panel.video ? panel.previewPath : ""
+                source: panel.video && !SkwdWallpaper.nativeRenderingSuppressed ? panel.previewPath : ""
                 fillMode: Wallpapers.videoFillFor(panel.fillMode)
                 enableTransitions: Config.options?.background?.transition?.enable ?? true
                 transitionBaseDuration: Config.options?.background?.transition?.duration ?? 800
@@ -106,7 +107,7 @@ Variants {
 
         Rectangle {
             anchors.fill: parent
-            visible: !panel.externalWallpaper && panel.effectivePath.length === 0
+            visible: !SkwdWallpaper.nativeRenderingSuppressed && !panel.externalWallpaper && panel.effectivePath.length === 0
             color: IrisStyle.surfaceOpaque
         }
 

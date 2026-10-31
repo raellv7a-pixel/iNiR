@@ -1180,6 +1180,7 @@ Scope {
             : WlrKeyboardFocus.None
         anchors { top: true; bottom: true; left: true; right: true }
         color: {
+            if (SkwdWallpaper.nativeRenderingSuppressed) return "transparent";
             if (!bgRoot.wallpaperSafetyTriggered || bgRoot.wallpaperIsVideo) return "transparent";
             return CF.ColorUtils.mix(Appearance.colors.colLayer0, Appearance.colors.colPrimary, 0.75);
         }
@@ -1434,6 +1435,7 @@ Scope {
             // Wallpaper container - used as reference for blur and widgets
             Item {
                 id: wallpaperContainer
+                visible: !SkwdWallpaper.nativeRenderingSuppressed
                 property int chunkSize: bgRoot.usePerMonitorRange ?
                     (bgRoot.effectiveWorkspaceLast - bgRoot.effectiveWorkspaceFirst + 1) :
                     (Config?.options?.bar?.workspaces?.shown ?? 10)
@@ -1615,7 +1617,7 @@ Scope {
                     layer.enabled: wallpaperContainer.needsStaticTexture
                         && !wallpaperContainer.showInternalStaticWallpaper
                         && !wallpaper.shaderOverlayHeld
-                    source: (bgRoot.webWallpaperActive || bgRoot.wallpaperSafetyTriggered || !wallpaperContainer.needsStaticTexture
+                    source: (SkwdWallpaper.nativeRenderingSuppressed || bgRoot.webWallpaperActive || bgRoot.wallpaperSafetyTriggered || !wallpaperContainer.needsStaticTexture
                             || Wallpapers.isVideoFile(bgRoot.wallpaperPath))
                         ? "" : bgRoot.wallpaperPath
                     // NEVER use crossfader transitions when awww is active — awww handles all transitions.
@@ -1665,7 +1667,7 @@ Scope {
                     playing: visible && bgRoot.enableAnimation && !GlobalStates.screenLocked && !Appearance._gameModeActive && !Wallpapers.batteryPauseActive
                         && Wallpapers.videoMotionAllowedOn(bgRoot.screenName)
                     asynchronous: true
-                    source: (bgRoot.webWallpaperActive || bgRoot.wallpaperSafetyTriggered || !bgRoot.wallpaperIsGif || bgRoot.backdropActive) ? "" : bgRoot.wallpaperPathRaw
+                    source: (SkwdWallpaper.nativeRenderingSuppressed || bgRoot.webWallpaperActive || bgRoot.wallpaperSafetyTriggered || !bgRoot.wallpaperIsGif || bgRoot.backdropActive) ? "" : bgRoot.wallpaperPathRaw
                     fillMode: Wallpapers.imageFillFor(bgRoot.fillMode)
                     // No sourceSize for GIFs - let Qt handle native size for performance
 
@@ -1704,7 +1706,7 @@ Scope {
                     // the source releases the decoder outright instead of only
                     // pausing it; the transition overlay covers the swap.
                     source: {
-                        if (bgRoot.webWallpaperActive || bgRoot.wallpaperSafetyTriggered || bgRoot.backdropActive) return "";
+                        if (SkwdWallpaper.nativeRenderingSuppressed || bgRoot.webWallpaperActive || bgRoot.wallpaperSafetyTriggered || bgRoot.backdropActive) return "";
                         if (!bgRoot._familyOwnsScreen) return "";
                         return bgRoot.wallpaperIsVideo ? bgRoot.wallpaperPathRaw : bgRoot._outgoingVideo;
                     }
@@ -1733,7 +1735,7 @@ Scope {
                 id: textureLoader
                 z: 0.5
                 anchors.fill: wallpaperContainer
-                active: bgRoot.textureWallpaperActive && bgRoot._familyOwnsScreen
+                active: !SkwdWallpaper.nativeRenderingSuppressed && bgRoot.textureWallpaperActive && bgRoot._familyOwnsScreen
                 sourceComponent: bgRoot.irisTexture === "leak" ? leakFilter : afterglowFilter
             }
             Component {
@@ -1762,7 +1764,7 @@ Scope {
             Loader {
                 id: blurAlwaysLoader
                 z: 1
-                active: Appearance.effectsEnabled
+                active: !SkwdWallpaper.nativeRenderingSuppressed && Appearance.effectsEnabled
                         && !bgRoot.webWallpaperActive
                         && (bgRoot.blurProgress > 0)
                         && (bgRoot.effectsOptions.enableBlur ?? false)
@@ -1793,7 +1795,7 @@ Scope {
             Loader {
                 id: blurLoader
                 z: 2
-                active: (bgRoot.lockBlurOptions.enable ?? false) && (GlobalStates.screenLocked || scaleAnim.running)
+                active: !SkwdWallpaper.nativeRenderingSuppressed && (bgRoot.lockBlurOptions.enable ?? false) && (GlobalStates.screenLocked || scaleAnim.running)
                 anchors.fill: wallpaperContainer
                 scale: GlobalStates.screenLocked ? (bgRoot.lockBlurOptions.extraZoom ?? 1) : 1
                 Behavior on scale {
@@ -1822,7 +1824,7 @@ Scope {
             Rectangle {
                 id: dimOverlay
                 anchors.fill: parent
-                visible: !bgRoot.backdropActive
+                visible: !SkwdWallpaper.nativeRenderingSuppressed && !bgRoot.backdropActive
                 z: 10
                 color: {
                     const effects = bgRoot.effectsOptions;
@@ -1848,7 +1850,7 @@ Scope {
                 id: vignetteOverlay
                 anchors.fill: parent
                 z: 11
-                visible: !bgRoot.backdropActive
+                visible: !SkwdWallpaper.nativeRenderingSuppressed && !bgRoot.backdropActive
 
                 // Bar-level vignette (darkens the edge under the bar)
                 Rectangle {
