@@ -40,6 +40,14 @@ quanto os renderizadores estáveis supervisionados diretamente pelo daemon;
 processos de transição e preferências salvas, sozinhos, não confirmam saúde.
 Listas recebidas pelos sinais QML são normalizadas para evitar falsas falhas.
 A consulta periódica também não adia uma geração de cores já agendada.
+O próprio Skwd recebe a paleta Material pronta da iNiR em
+`$XDG_STATE_HOME/quickshell/user/generated/colors.json` (por padrão,
+`~/.local/state/quickshell/user/generated/colors.json`). O daemon aproveita o
+contrato de importação Material existente, atualiza somente seu cache de cores
+e notifica a interface pelo evento `theme_done`, que aplica sua transição visual.
+A paleta já existente é carregada também na inicialização e na ativação da
+autoridade iNiR. Esse caminho não gera temas, não altera a paleta da shell e não
+aplica novamente o wallpaper. Arquivos incompletos mantêm a última paleta válida.
 Quando o monitor escolhido não está conectado, a última referência de cores é
 mantida até uma nova confirmação. Wallpapers salvos no Skwd têm prioridade; na
 primeira transferência, um monitor sem atribuição recebe o wallpaper nativo
@@ -164,3 +172,16 @@ e seu backup, usa a imagem nativa para inicializar DP-1/DP-2, aplica outra image
 em todos os monitores com transição, verifica eventos de cores e várias consultas
 de saúde, e retorna ao modo nativo. A renderização e a janela reais permanecem
 para o teste visual.
+
+Para verificar o retorno das cores ao Skwd sem sessão gráfica:
+
+```bash
+cd ~/Projetos/skwd-deck
+python tests/integration-inir-palette-isolated.py
+```
+
+Depois dessa correção, basta carregar o daemon recompilado. Na sessão de teste,
+selecione primeiro **Nativo da iNiR** e aguarde a liberação, feche o Skwd, encerre
+o daemon antigo com `pkill -u "$UID" -x skwd-walld` e selecione **Skwd-wall**
+novamente. A própria shell iniciará o executável preparado no diretório de teste.
+Não é necessário sincronizar ou substituir a instalação ativa para testar isso.
