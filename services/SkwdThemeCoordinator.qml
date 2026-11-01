@@ -32,14 +32,18 @@ QtObject {
     function seed(snapshot: var): void {
         if (!root.enabled || snapshot?.available !== true || !Array.isArray(snapshot.outputs)) return
         const next = Object.assign({}, root.latest)
+        let changed = false
         for (const item of snapshot.outputs) {
             const output = String(item?.output ?? "")
             const path = String(item?.theme_source ?? "")
             if (item?.rendered !== true || !output || !path || next[output]) continue
             next[output] = { path: path, generation: -1 }
+            changed = true
         }
-        root.latest = next
-        root.queueSelected()
+        if (changed) {
+            root.latest = next
+            root.queueSelected()
+        }
     }
 
     function queueSelected(): void {

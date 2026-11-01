@@ -97,7 +97,6 @@ Singleton {
             return true
         }
         if (mode !== "skwd" || !root.integrationCompatible
-                || root.themeAuthority !== "inir" || root.pickOnly
                 || !root.capabilities.includes("renderer-handoff-v1")
                 || !root.capabilities.includes("rendered-snapshot-v1")) return false
         handoff.expectedOutputs = Array.from(outputs ?? [])
@@ -227,6 +226,8 @@ Singleton {
             if (message.event === "skwd.wall.applied") {
                 if (root.integrationEligible) root.rememberSource(message.data ?? ({}))
                 themeCoordinator.accept(message.data ?? ({}))
+                if (root.integrationEligible && message.data?.rendered === true)
+                    handoff.confirmReady(String(message.data.output ?? ""))
                 root.wallpaperApplied(message.data ?? ({}))
                 if (handoff.phase === "waiting-ready" && message.data?.rendered === true)
                     root.send("integration.snapshot", {})
@@ -284,6 +285,11 @@ Singleton {
                 }
         } else if (method === "integration.release" && result.released === true) {
             root.rendererReleased = true
+            if (result.configured_inir === true) {
+                root.themeAuthority = "inir"
+                root.pickOnly = false
+                root.refresh()
+            }
         } else if (method === "integration.acquire" && result.claimed === true) {
             // A claim permits rendering but is not a readiness confirmation.
             root.rendererReleased = false
@@ -358,7 +364,7 @@ Singleton {
     }
     SkwdHandoff {
         id: handoff
-        onReleaseRequested: id => root.sendHandoff("integration.release", {}, id, handoff.phase)
+        onReleaseRequested: id => root.sendHandoff("integration.release", {configure_inir: handoff.phase === "release-for-skwd"}, id, handoff.phase)
         onAcquireRequested: (id, token) => root.acquirePersistenceRequested(id, token)
         onPauseNativeRequested: id => root.nativePauseRequested(id)
         onResumeNativeRequested: id => root.nativeResumeRequested(id)

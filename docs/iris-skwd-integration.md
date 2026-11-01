@@ -1,9 +1,9 @@
 # Integração iRiS e Skwd-wall: teste local e recuperação
 
 A integração está implementada nos forks locais. A validação disponível usa QML
-em modo offscreen, configuração descartável, o daemon real e um controlador
-Paper simulado. Os binários gráficos foram compilados, mas nenhuma sessão
-Wayland foi iniciada durante o desenvolvimento. Reprodução real, efeitos,
+em modo offscreen, configuração descartável e o daemon real, com renderizadores,
+controlador Paper e interface gráfica simulados. Os binários gráficos foram
+compilados, mas nenhuma sessão Wayland foi iniciada durante o desenvolvimento. Reprodução real, efeitos,
 Wallpaper Engine, suspend/resume e posicionamento nos monitores ainda precisam
 de teste no desktop.
 
@@ -12,16 +12,21 @@ de teste no desktop.
 Em Configurações da iRiS → Papel de parede → Skwd-wall:
 
 - **Gerenciador de papéis de parede:** nativo da iNiR (padrão) ou Skwd-wall.
-- **Abrir Skwd-wall:** abre a interface original. Em modo nativo, o daemon
-  iniciado pela integração fica impedido de aplicar wallpapers.
+- **Abrir Skwd-wall:** ativa a integração automaticamente e abre a interface
+  original após a transferência do controle de renderização.
 - **Seletor de papel de parede:** interface do Skwd ou galeria da iRiS.
 - **Monitor para as cores globais:** DP-1 (padrão) ou DP-2.
 
-No Skwd, selecione `skwd-paper` como motor, `iNiR` como autoridade de temas e
-**desative pick-only** antes de ativar o modo integrado. A integração verifica
-essas condições e recusa uma transferência incompatível. Steam/steamcmd e os
-modelos do Lens são dependências opcionais dos recursos correspondentes; não
-foram instalados ou configurados automaticamente.
+Selecionar **Skwd-wall** como gerenciador ou clicar em **Abrir Skwd-wall**
+configura automaticamente o motor `skwd-paper`, a autoridade de temas `iNiR` e
+desativa o modo somente seleção. Não é necessário ajustar esses pré-requisitos
+na interface do Skwd. A configuração ocorre com a renderização do Skwd bloqueada,
+antes de parar o renderer nativo. As outras preferências são preservadas; uma
+cópia original é salva em `~/.config/skwd-wall-v2/config.before-inir-integration.json`
+(ou no diretório XDG correspondente), sem sobrescrever uma cópia já existente.
+Ao voltar ao modo nativo, o Skwd permanece impedido de renderizar e de gerar
+temas; suas preferências não são restauradas automaticamente por cima de edições
+posteriores. Steam/steamcmd e modelos do Lens continuam opcionais.
 
 A ilha, o cartão de wallpaper, a ação de troca e o menu do desktop usam o
 seletor escolhido. A galeria nativa encaminha aplicações ao Skwd enquanto ele
@@ -29,6 +34,12 @@ possui o renderer; a prévia nativa fica suspensa nesse modo. Os recursos
 avançados continuam no aplicativo original do Skwd.
 
 Eventos confirmados atualizam a fila de cores da iNiR sem reaplicar o wallpaper.
+Uma aplicação global em `*` publica uma confirmação para cada monitor conectado.
+A verificação de saúde reconhece tanto atribuições prontas do controlador Paper
+quanto os renderizadores estáveis supervisionados diretamente pelo daemon;
+processos de transição e preferências salvas, sozinhos, não confirmam saúde.
+Listas recebidas pelos sinais QML são normalizadas para evitar falsas falhas.
+A consulta periódica também não adia uma geração de cores já agendada.
 Quando o monitor escolhido não está conectado, a última referência de cores é
 mantida até uma nova confirmação. Wallpapers salvos no Skwd têm prioridade; na
 primeira transferência, um monitor sem atribuição recebe o wallpaper nativo
@@ -55,7 +66,22 @@ O backup anterior continua em
 O teste abaixo usa a configuração pessoal e poderá gravar a preferência de
 integração e as configurações escolhidas no Skwd. Mantenha um terminal aberto.
 
-Pare a shell supervisionada e execute o checkout em primeiro plano:
+Se ainda houver uma sessão de teste anterior, encerre-a primeiro e feche a
+janela do Skwd. É necessário reiniciar também o daemon antigo para carregar as
+correções; recompilar o arquivo não atualiza um processo já em execução.
+
+Pare a shell supervisionada, confirme a liberação do Skwd e só então encerre o
+daemon anterior (o último comando não inicia nenhum renderer):
+
+```bash
+systemctl --user stop inir.service
+cd ~/Projetos/inir
+python scripts/skwd-restore-native.py --shell-stopped && \
+  { pkill -u "$UID" -x skwd-walld || test "$?" -eq 1; }
+```
+
+Se a recuperação falhar, siga a seção de recuperação abaixo antes de continuar.
+Com a recuperação concluída, execute o checkout em primeiro plano:
 
 ```bash
 systemctl --user stop inir.service
@@ -70,9 +96,9 @@ Esse comando não copia arquivos para `~/.config/quickshell/inir`. Não execute
 uma segunda shell enquanto o serviço estiver ativo. O teste temporariamente
 substitui a shell visível até seu encerramento.
 
-Abra o Skwd pelas configurações, ajuste os pré-requisitos e selecione o modo
-integrado. Teste imagens diferentes em DP-1/DP-2, troca do monitor de referência,
-seletores, vídeo, playlist, reinício da shell e retorno ao modo nativo. Verifique
+Nas configurações da iRiS, selecione **Skwd-wall** como gerenciador ou use
+**Abrir Skwd-wall**. A preparação é automática. Teste imagens diferentes em
+DP-1/DP-2, troca do monitor de referência, seletores, vídeo, playlist, reinício da shell e retorno ao modo nativo. Verifique
 se a referência muda somente após aplicação confirmada e se as configurações de
 wallpaper nativo continuam disponíveis ao retornar. Se a transferência falhar,
 a iRiS só reinicia o renderer nativo após a confirmação de liberação do Skwd.
@@ -131,3 +157,10 @@ python scripts/test-iris-defaults.py
 Os testes que usam o daemon esperam a compilação local em
 `../skwd-deck/target/debug/skwd-walld`. Todos criam configurações e sockets
 próprios; não conectam ao daemon da sessão pessoal.
+
+O teste `test-skwd-daemon-qml.py` parte de motor AWWW, autoridade Skwd e modo
+somente seleção. Ele aciona o botão de abertura, verifica a preparação automática
+e seu backup, usa a imagem nativa para inicializar DP-1/DP-2, aplica outra imagem
+em todos os monitores com transição, verifica eventos de cores e várias consultas
+de saúde, e retorna ao modo nativo. A renderização e a janela reais permanecem
+para o teste visual.

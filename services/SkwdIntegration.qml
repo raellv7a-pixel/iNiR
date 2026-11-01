@@ -50,12 +50,10 @@ Singleton {
     function statusText(): string {
         if (!root.usable)
             return Translation.tr("Switching wallpaper managers requires the iRiS overlay and the Awww backend.")
-        if (root.lastError.includes("theme authority") || root.lastError.includes("pick-only"))
-            return Translation.tr("In Skwd, select iNiR theme authority and turn off pick-only mode.")
         if (root.lastError.includes("connect") || root.lastError.includes("capabilities"))
             return Translation.tr("Could not connect to a compatible Skwd daemon.")
         if (root.lastError)
-            return Translation.tr("Could not switch wallpaper managers. Check that Skwd uses skwd-paper and try again.")
+            return Translation.tr("Could not configure the wallpaper integration. Check the Skwd daemon and try again.")
         return root.pendingMode ? Translation.tr("Switching wallpaper manager…") : ""
     }
 
@@ -69,16 +67,12 @@ Singleton {
     }
 
     function openSkwd(): void {
-        if (SkwdWallpaper.connected) {
+        if (SkwdWallpaper.handoffPhase === "skwd") {
             root.launch("skwd-wall-v2", [])
             return
         }
         root.openWhenConnected = true
-        SkwdWallpaper.enabled = true
-        if (!root.daemonLaunchRequested) {
-            root.daemonLaunchRequested = true
-            root.launch("skwd-walld", ["--external-wallpaper-owner"])
-        }
+        if (!root.requestMode("skwd")) root.openWhenConnected = false
     }
 
     function start(): void {
@@ -104,6 +98,7 @@ Singleton {
             return false
         }
         root.lastError = ""
+        if (mode === "native") root.openWhenConnected = false
         if (mode === "skwd" && SkwdWallpaper.handoffPhase === "skwd") return true
         if (mode === "native" && SkwdWallpaper.handoffPhase === "native"
                 && !SkwdWallpaper.nativeRenderingSuppressed) {
@@ -138,11 +133,6 @@ Singleton {
 
     function tryStart(): void {
         if (root.pendingMode !== "skwd" || root.operationStarted || !SkwdWallpaper.integrationCompatible) return
-        if (SkwdWallpaper.themeAuthority !== "inir" || SkwdWallpaper.pickOnly) {
-            connectionDeadline.stop()
-            root.lastError = "Set Skwd theme authority to iNiR and disable pick-only mode."
-            return
-        }
         connectionDeadline.stop()
         root.operationStarted = true
         if (!SkwdWallpaper.requestOwnership("skwd", root.outputs())) {
@@ -152,11 +142,14 @@ Singleton {
     }
 
     function seedMissingOutputs(result: var): void {
-        if (SkwdWallpaper.handoffPhase !== "waiting-ready" || !Array.isArray(result?.outputs)) return
+        if (SkwdWallpaper.handoffPhase !== "waiting-ready") return
+        // Signal var arguments may expose a QVariantList rather than a JS
+        // Array. Normalize before inspecting the daemon's output list.
+        const savedOutputs = Array.from(result?.outputs ?? [])
         const background = Config.options?.background ?? ({})
         const monitors = Array.from(background.wallpapersByMonitor ?? [])
         for (const output of root.outputs()) {
-            const saved = result.outputs.find(item => item.name === output)
+            const saved = savedOutputs.find(item => item.name === output)
             if (!saved || saved.path || saved.we_id || saved.current) continue
             const entry = (background.multiMonitor?.enable ?? false) ? monitors.find(item => item.monitor === output) : null
             const path = String(entry?.path || background.wallpaperPath || "").replace(/^file:\/\//, "")
@@ -251,10 +244,6 @@ Singleton {
         target: SkwdWallpaper
         function onConnectedChanged(): void {
             if (SkwdWallpaper.connected) daemonRecovery.stop()
-            if (SkwdWallpaper.connected && root.openWhenConnected) {
-                root.openWhenConnected = false
-                root.launch("skwd-wall-v2", [])
-            }
         }
         function onDisconnected(): void {
             if (root.savedMode !== "skwd" && root.pendingMode !== "skwd" && root.pendingMode !== "native") return
@@ -273,7 +262,11 @@ Singleton {
             if (SkwdWallpaper.connected && SkwdWallpaper.handoffPhase === "skwd" && SkwdWallpaper.pickOnly) root.requestMode("native")
             else root.tryStart()
         }
-        function onHandoffFailed(message: string): void { root.lastError = message }
+        function onHandoffFailed(message: string): void {
+            root.openWhenConnected = false
+            root.lastError = message
+            console.warn("[SkwdIntegration]", message)
+        }
         function onRequestFinished(id: int, method: string, result: var, error: var): void {
             if (id === root.fallbackRequestId) {
                 root.fallbackRequestId = 0
@@ -284,11 +277,13 @@ Singleton {
             root.healthRequestId = 0
             if (SkwdWallpaper.handoffPhase !== "skwd") { root.healthFailures = 0; return }
             const outputs = root.outputs()
-            const ready = !error && result?.available === true && Array.isArray(result.outputs)
-                && outputs.length > 0 && outputs.every(output => result.outputs.some(item => item?.rendered === true && item.output === output))
+            const renderedOutputs = Array.from(result?.outputs ?? [])
+            const ready = !error && result?.available === true
+                && outputs.length > 0 && outputs.every(output => renderedOutputs.some(item => item?.rendered === true && item.output === output))
             root.healthFailures = ready || outputs.length === 0 ? 0 : root.healthFailures + 1
             if (root.healthFailures < 3) return
             root.healthFailures = 0
+            console.warn("[SkwdIntegration] Renderer health confirmation failed for", JSON.stringify(outputs))
             SkwdWallpaper.markRendererUnhealthy()
             root.pendingMode = "skwd"
             root.operationStarted = false
@@ -305,6 +300,10 @@ Singleton {
             if (SkwdWallpaper.handoffPhase === "waiting-ready") {
                 root.fallbackRequestId = SkwdWallpaper.send("wall.outputs", {})
             } else if (SkwdWallpaper.handoffPhase === "skwd") {
+                if (root.openWhenConnected) {
+                    root.openWhenConnected = false
+                    root.launch("skwd-wall-v2", [])
+                }
                 Config.setNestedValue("iris.skwd.mode", "skwd")
                 root.pendingMode = ""
                 root.operationStarted = false
