@@ -43,7 +43,8 @@ QtObject {
     }
     function commit(spec: var, next: var): void {
         // A family switch goes through the shell's transition, never a bare config write.
-        if (spec.path === "panelFamily") Quickshell.execDetached([Quickshell.shellPath("scripts/inir"), "panelFamily", "set", String(next)])
+        if (spec.path === "iris.skwd.mode") SkwdIntegration.requestMode(String(next))
+        else if (spec.path === "panelFamily") Quickshell.execDetached([Quickshell.shellPath("scripts/inir"), "panelFamily", "set", String(next)])
         else if (spec.widgetDesign) DesktopWidgetDesign.apply(String(next))
         else if (spec.niri) IrisNiri.set(spec, next)
         else if (spec.kind === "icon") IrisPieces.setGlyph(String(spec.piece ?? ""), String(next ?? ""))
@@ -751,6 +752,10 @@ QtObject {
         { section: "dock", group: "Apps", label: "Open apps", description: "Pinned apps can keep their place while open, or join the other open apps, which line up in the order you opened them.", path: "iris.dock.arrange", kind: "choice", fallback: "pinned", choices: [{label:"Keep pinned place",value:"pinned",glyph:"keep"},{label:"In opening order",value:"opened",glyph:"schedule"}], keywords: ["order", "sort", "arrange", "organize", "group", "opened", "running", "pinned", "first", "orden", "ordenar", "organizar", "abiertas", "fijadas", "apertura"] },
         { section: "dock", group: "Apps", label: "Drag to reorder", description: "Slide an icon along the Dock to move it. Dropped among the pinned apps, an app stays pinned there.", path: "iris.dock.reorder", kind: "switch", fallback: true, keywords: ["drag", "drop", "move", "reorder", "rearrange", "position", "arrastrar", "mover", "reordenar", "posición"] },
         { section: "motion", group: "Motion", label: "Reduce motion", description: "Surfaces appear in place. Shapes and joins stay the same.", path: "iris.appearance.motion", invert: true, kind: "switch", fallback: true },
+        { section: "wallpaper", group: "Skwd-wall", label: "Wallpaper manager", description: "Use iNiR's renderer or let Skwd-wall manage wallpapers while iNiR generates the colours.", path: "iris.skwd.mode", kind: "choice", fallback: "native", choices: [{label:"iNiR native",value:"native"},{label:"Skwd-wall",value:"skwd"}], note: () => SkwdIntegration.statusText() },
+        { section: "wallpaper", group: "Skwd-wall", label: "Open Skwd-wall", description: "Open Skwd's library and settings. Enable integration before applying a wallpaper.", kind: "action", button: "Open", run: () => SkwdIntegration.openSkwd() },
+        { section: "wallpaper", group: "Skwd-wall", label: "Wallpaper selector", description: "Choose which interface opens from the Island and wallpaper buttons.", path: "iris.skwd.selector", kind: "choice", fallback: "skwd", choices: [{label:"Skwd-wall",value:"skwd"},{label:"iRiS gallery",value:"native"}], visibleWhen: "iris.skwd.mode=skwd" },
+        { section: "wallpaper", group: "Skwd-wall", label: "Monitor for global colours", description: "Use this monitor's wallpaper as the source for the shell and application colours.", path: "iris.skwd.themeOutput", kind: "choice", fallback: "DP-1", choices: [{label:"DP-1",value:"DP-1"},{label:"DP-2",value:"DP-2"}], visibleWhen: "iris.skwd.mode=skwd" },
         { section: "desktop", group: "Widgets", label: "Desktop widgets", description: "Turning this off also unloads their data providers.", path: "iris.modules.desktopWidgets", kind: "switch", fallback:true },
         { section: "desktop", group: "Overview backdrop", label: "Wallpaper behind the overview", description: "Shown around workspaces when Niri's overview is open.", path: "background.backdrop.enable", kind: "switch", fallback:true },
         { section: "desktop", group: "Overview backdrop", label: "Same wallpaper as the desktop", description: "Off keeps the overview's own wallpaper; choose it in the gallery with Overview as the target.", path: "background.backdrop.useMainWallpaper", kind: "switch", fallback: true },

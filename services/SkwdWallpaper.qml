@@ -4,6 +4,7 @@ pragma ComponentBehavior: Bound
 import QtQuick
 import Quickshell
 import Quickshell.Io
+import qs.modules.common
 
 // Transport only: callers opt in explicitly. No renderer or configuration is
 // changed by opening this connection.
@@ -42,12 +43,17 @@ Singleton {
     property bool colorSyncEnabled: false
     property alias themeOutput: themeCoordinator.output
     property string confirmedThemeSource: ""
+    property var confirmedSources: ({})
+    property var confirmedGenerations: ({})
     // The shell must install a native-renderer adapter and establish its
     // baseline before ownership changes can be requested.
     property bool nativeAdapterAvailable: false
     property bool nativeBaselineVerified: false
     // Set only by the native adapter while it is relinquishing ownership.
-    property bool nativeRenderingSuppressed: false
+    // Until Config has loaded, keep native rendering parked. A persisted Skwd
+    // session must not briefly start Awww before its ownership is reconciled.
+    property bool nativeRenderingSuppressed: true
+    property bool bootDecisionMade: false
     property bool nativeBackdropStopped: false
     readonly property alias handoffPhase: handoff.phase
     property var handoffRequests: ({})
@@ -58,7 +64,28 @@ Singleton {
     signal disconnected()
     signal nativePauseRequested(int id)
     signal nativeResumeRequested(int id)
+    signal acquirePersistenceRequested(int id, string token)
     signal handoffFailed(string message)
+
+    function decideBootOwnership(): void {
+        if (root.bootDecisionMade || !Config.ready || !Config.loadedSafely) return
+        const integrated = (Config.options?.iris?.skwd?.mode ?? "native") === "skwd"
+        root.nativeRenderingSuppressed = integrated
+        if (root.nativeRenderingSuppressed) {
+            // Neither cached settings nor a marker proves which renderer owns
+            // the desktop after a shell restart. Release must be acknowledged.
+            handoff.phase = "blocked"
+            handoff.desired = "skwd"
+            handoff.nativeKnownActive = false
+        }
+        root.bootDecisionMade = true
+    }
+    Component.onCompleted: root.decideBootOwnership()
+    Connections {
+        target: Config
+        function onReadyChanged(): void { root.decideBootOwnership() }
+        function onLoadedSafelyChanged(): void { root.decideBootOwnership() }
+    }
 
     function requestOwnership(mode: string, outputs: var): bool {
         if (!root.nativeAdapterAvailable || !root.nativeBaselineVerified) return false
@@ -80,6 +107,33 @@ Singleton {
 
     function updateOwnershipOutputs(outputs: var): void {
         handoff.expectedOutputs = Array.from(outputs ?? [])
+    }
+
+    function markRendererUnhealthy(): void {
+        if (handoff.phase !== "skwd") return
+        handoff.nativeKnownActive = false
+        handoff.desired = "skwd"
+        handoff.phase = "blocked"
+    }
+
+    function rememberSource(item: var, seedOnly = false): void {
+        const output = String(item?.output ?? "")
+        const source = String(item?.theme_source ?? "")
+        if (item?.rendered !== true || !output || !source || (seedOnly && root.confirmedSources[output])) return
+        const generation = seedOnly ? -1 : Number(item?.generation)
+        if (!Number.isFinite(generation) || generation < (seedOnly ? -1 : 0)) return
+        if (!seedOnly && root.confirmedGenerations[output] !== undefined
+                && generation <= root.confirmedGenerations[output]) return
+        const next = Object.assign({}, root.confirmedSources)
+        const generations = Object.assign({}, root.confirmedGenerations)
+        next[output] = source
+        generations[output] = generation
+        root.confirmedSources = next
+        root.confirmedGenerations = generations
+    }
+
+    function sourceForOutput(output: string): string {
+        return String(root.confirmedSources[output || root.themeOutput] ?? "")
     }
 
     function sendHandoff(method: string, params: var, operationId: int, action: string): void {
@@ -110,6 +164,11 @@ Singleton {
 
     function nativeResumeFinished(id: int, ok: bool, message = ""): void {
         handoff.complete(id, "resume-native", ok, {message: message})
+    }
+
+    function acquisitionPersisted(id: int, token: string): void {
+        if (handoff.phase !== "acquire-skwd" || handoff.operationId !== id || handoff.releaseToken !== token) return
+        root.sendHandoff("integration.acquire", {token: token}, id, "acquire-skwd")
     }
 
     function applySelection(path: string, output: string, isVideo: bool): bool {
@@ -154,7 +213,11 @@ Singleton {
     onReadyChanged: if (root.ready && handoff.phase === "blocked" && handoff.desired === "native")
         handoff.request("native")
     onThemeOutputChanged: root.confirmedThemeSource = ""
-    onNativeRenderingSuppressedChanged: if (!root.nativeRenderingSuppressed) root.confirmedThemeSource = ""
+    onNativeRenderingSuppressedChanged: if (!root.nativeRenderingSuppressed) {
+        root.confirmedThemeSource = ""
+        root.confirmedSources = ({})
+        root.confirmedGenerations = ({})
+    }
 
     function handleLine(line: string): void {
         let message
@@ -162,6 +225,7 @@ Singleton {
         if (!message || typeof message !== "object") return
         if (typeof message.event === "string") {
             if (message.event === "skwd.wall.applied") {
+                if (root.integrationEligible) root.rememberSource(message.data ?? ({}))
                 themeCoordinator.accept(message.data ?? ({}))
                 root.wallpaperApplied(message.data ?? ({}))
                 if (handoff.phase === "waiting-ready" && message.data?.rendered === true)
@@ -214,8 +278,10 @@ Singleton {
         } else if (method === "integration.snapshot") {
             themeCoordinator.seed(result)
             if (result.available === true && Array.isArray(result.outputs))
-                for (const item of result.outputs)
+                for (const item of result.outputs) {
+                    root.rememberSource(item, true)
                     if (item?.rendered === true) handoff.confirmReady(String(item.output ?? ""))
+                }
         } else if (method === "integration.release" && result.released === true) {
             root.rendererReleased = true
         } else if (method === "integration.acquire" && result.claimed === true) {
@@ -262,6 +328,8 @@ Singleton {
                 root.rendererReleased = true
                 root.capabilities = []
                 root.outputs = []
+                root.confirmedSources = ({})
+                root.confirmedGenerations = ({})
                 const lost = root.pending
                 root.pending = ({})
                 root.pendingSince = ({})
@@ -269,6 +337,11 @@ Singleton {
                 for (const id of Object.keys(lost)) {
                     root.finishHandoffRequest(Number(id), String(lost[id]), null, { message: "Skwd connection lost" })
                     root.requestFinished(Number(id), String(lost[id]), null, { message: "Skwd connection lost" })
+                }
+                if (handoff.phase === "skwd") {
+                    handoff.nativeKnownActive = false
+                    handoff.desired = "skwd"
+                    handoff.phase = "blocked"
                 }
                 root.disconnected()
                 root.scheduleReconnect()
@@ -286,7 +359,7 @@ Singleton {
     SkwdHandoff {
         id: handoff
         onReleaseRequested: id => root.sendHandoff("integration.release", {}, id, handoff.phase)
-        onAcquireRequested: (id, token) => root.sendHandoff("integration.acquire", {token: token}, id, "acquire-skwd")
+        onAcquireRequested: (id, token) => root.acquirePersistenceRequested(id, token)
         onPauseNativeRequested: id => root.nativePauseRequested(id)
         onResumeNativeRequested: id => root.nativeResumeRequested(id)
         onFailed: message => root.handoffFailed(message)

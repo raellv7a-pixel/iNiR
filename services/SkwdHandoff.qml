@@ -9,6 +9,7 @@ QtObject {
     id: root
     property string phase: "native"
     property string desired: "native"
+    property bool nativeKnownActive: true
     property var expectedOutputs: []
     property var readyOutputs: ({})
     property string releaseToken: ""
@@ -24,6 +25,7 @@ QtObject {
 
     function startOperation(name: string): void {
         const id = ++root.operationId
+        if (name === "pause-native") root.nativeKnownActive = false
         root.phase = name
         if (root.operationId !== id || root.phase !== name) return
         watchdog.restart()
@@ -41,7 +43,8 @@ QtObject {
     function request(mode: string): void {
         if (mode !== "native" && mode !== "skwd") return
         root.desired = mode
-        if (root.phase === "native" && mode === "skwd") root.startOperation("release-for-skwd")
+        if ((root.phase === "native" || (root.phase === "blocked" && !root.uncertainPauseId)) && mode === "skwd")
+            root.startOperation("release-for-skwd")
         else if ((root.phase === "skwd" || (root.phase === "blocked" && !root.uncertainPauseId)) && mode === "native")
             root.startOperation("release-for-native")
         else if (root.phase === "waiting-ready" && mode === "native")
@@ -60,7 +63,7 @@ QtObject {
         if (!ok) {
             root.lastError = String(result?.message ?? "Wallpaper ownership operation failed")
             root.failed(root.lastError)
-            if (action === "release-for-skwd") root.phase = "native"
+            if (action === "release-for-skwd") root.phase = root.nativeKnownActive ? "native" : "blocked"
             else if (action === "pause-native") {
                 root.desired = "native"
                 root.startOperation("resume-native")
@@ -75,9 +78,12 @@ QtObject {
             root.releaseToken = String(result?.token ?? "")
             if (!root.releaseToken) {
                 root.lastError = "Skwd did not provide an ownership token"
-                root.phase = "native"
+                root.phase = root.nativeKnownActive ? "native" : "blocked"
                 root.failed(root.lastError)
-            } else if (root.desired === "native") root.phase = "native"
+            } else if (root.desired === "native") {
+                if (root.nativeKnownActive) root.phase = "native"
+                else root.startOperation("resume-native")
+            }
             else root.startOperation("pause-native")
         } else if (action === "pause-native") {
             if (root.desired === "native") root.startOperation("resume-native")
@@ -91,6 +97,7 @@ QtObject {
             }
         } else if (action === "release-for-native") root.startOperation("resume-native")
         else if (action === "resume-native") {
+            root.nativeKnownActive = true
             root.phase = "native"
             if (root.desired === "skwd") root.startOperation("release-for-skwd")
         }

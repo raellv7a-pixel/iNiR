@@ -81,7 +81,7 @@ ClippingRectangle {
     }
     function openGallery(): void {
         GlobalStates.settingsOverlayOpen = false
-        GlobalStates.wallpaperSelectorOpen = true
+        SkwdIntegration.openSelector(card.screen?.name ?? "")
     }
 
     Layout.fillWidth: true

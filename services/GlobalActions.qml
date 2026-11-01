@@ -306,7 +306,9 @@ Singleton {
             keywords: ["wallpaper", "background", "wall", "image", "grid"],
             execute: () => {
                 root.runLauncher(["coverflowSelector", "close"])
-                root.runLauncher(["wallpaperSelector", "open"])
+                if ((Config.options?.panelFamily ?? "ii") === "iris")
+                    SkwdIntegration.openSelector(GlobalStates.focusedScreen?.name ?? "")
+                else root.runLauncher(["wallpaperSelector", "open"])
             }
         },
         {

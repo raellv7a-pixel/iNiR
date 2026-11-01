@@ -1,6 +1,7 @@
 module qs.services
 singleton AwwwBackend 1.0 AwwwBackend.qml
 singleton SkwdWallpaper 1.0 SkwdWallpaper.qml
+singleton SkwdIntegration 1.0 SkwdIntegration.qml
 SkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml
 SkwdHandoff 1.0 SkwdHandoff.qml
 singleton Ai 1.0 Ai.qml

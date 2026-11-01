@@ -700,6 +700,10 @@ Singleton {
 
     function currentMainWallpaperPath(monitorName = ""): string {
         const targetMonitor = monitorName || (WallpaperListener.multiMonitorEnabled ? WallpaperListener.getFocusedMonitor() : "")
+        if (SkwdWallpaper.nativeRenderingSuppressed && SkwdWallpaper.handoffPhase === "skwd") {
+            const source = SkwdWallpaper.sourceForOutput(targetMonitor)
+            if (source) return source
+        }
         if (WallpaperListener.multiMonitorEnabled && targetMonitor) {
             const data = WallpaperListener.effectivePerMonitor[targetMonitor] ?? null
             if (data && data.path)
@@ -717,7 +721,7 @@ Singleton {
     // The image the desktop actually shows on an output: the backdrop's when it replaces the wallpaper
     // ("show only the backdrop", ii and iRiS), the main wallpaper otherwise. Glass and Lume read this one,
     // or they sample a wallpaper nobody sees.
-    readonly property bool desktopShowsBackdrop: !root.isWaffleFamily && root.useBackdropWallpaper
+    readonly property bool desktopShowsBackdrop: !SkwdWallpaper.nativeRenderingSuppressed && !root.isWaffleFamily && root.useBackdropWallpaper
     readonly property real desktopDim: root.desktopShowsBackdrop
         ? Math.max(0, Math.min(1, Number(Config.options?.background?.backdrop?.dim ?? 35) / 100)) : 0
     readonly property real desktopSaturation: root.desktopShowsBackdrop ? Number(Config.options?.background?.backdrop?.saturation ?? 0) : 0

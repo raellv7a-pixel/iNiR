@@ -13,7 +13,7 @@ Singleton {
     id: root
 
     readonly property string provider: "awww"
-    readonly property bool enabled: (Config.options?.background?.backend?.provider ?? "awww") === provider
+    readonly property bool enabled: Config.ready && (Config.options?.background?.backend?.provider ?? "awww") === provider
         && !SkwdWallpaper.nativeRenderingSuppressed
     readonly property int transitionFps: Config.options?.background?.backend?.awww?.transitionFps ?? 60
     readonly property int simpleStep: Config.options?.background?.backend?.awww?.simpleStep ?? 5
@@ -673,6 +673,9 @@ Singleton {
             SkwdWallpaper.nativeResumeFinished(id, false, "Native wallpaper shutdown is still running")
             return
         }
+        // The Skwd release is acknowledged before this callback is issued.
+        if ((Config.options?.iris?.skwd?.mode ?? "native") === "skwd")
+            Config.setNestedValue("iris.skwd.mode", "native")
         SkwdWallpaper.nativeRenderingSuppressed = false
         root.lastSyncSignature = ""
         root.forceSync()

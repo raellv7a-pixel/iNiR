@@ -65,8 +65,11 @@ Singleton {
             out.push({ type: "hero", id: "wallpaper", text: Translation.tr("Wallpaper"), detail: Translation.tr("Change"), image: preview,
                 iconName: "chevron_right",
                 action: () => {
-                    GlobalStates.wallpaperSelectorTargetMonitor = screenName
-                    GlobalActions.runLauncher(["wallpaperSelector", "toggle"])
+                    if (SkwdIntegration.useSkwdSelector) SkwdIntegration.openSelector(screenName)
+                    else {
+                        GlobalStates.wallpaperSelectorTargetMonitor = screenName
+                        GlobalActions.runLauncher(["wallpaperSelector", "toggle"])
+                    }
                 },
                 secondary: { id: "wallpaperNext", iconName: "shuffle", text: Translation.tr("Next wallpaper"),
                     action: () => Wallpapers.nextWallpaper(Appearance.m3colors.darkmode, screenName) } })

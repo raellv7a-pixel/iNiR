@@ -14,7 +14,85 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def mock_config(base, mode="native", readable=True):
+    common = base / "qs/modules/common"
+    common.mkdir(parents=True, exist_ok=True)
+    (common / "qmldir").write_text("module qs.modules.common\nsingleton Config 1.0 Config.qml\n")
+    (common / "Config.qml").write_text(
+        'pragma Singleton\nimport QtQuick\nQtObject { property bool ready: true; property bool loadedSafely: ' + ("true" if readable else "false") + '; '
+        'property var options: ({panelFamily: "iris", iris: {skwd: {mode: "' + mode + '"}}}) }\n')
+
+
 class SkwdTransportTest(unittest.TestCase):
+    def test_unreadable_config_does_not_start_native_renderer(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-skwd-unreadable-") as temp:
+            base = Path(temp)
+            module = base / "testbridge"
+            module.mkdir()
+            mock_config(base, "native", readable=False)
+            (base / "runtime").mkdir(mode=0o700)
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
+            for name in ("SkwdWallpaper.qml", "SkwdThemeCoordinator.qml", "SkwdHandoff.qml"):
+                shutil.copy(ROOT / "services" / name, module / name)
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+import testbridge
+ShellRoot {
+    Timer { interval: 5; running: true; onTriggered: {
+        if (SkwdWallpaper.nativeRenderingSuppressed && !SkwdWallpaper.bootDecisionMade) {
+            console.log("UNREADABLE_CONFIG_BLOCKED"); Qt.exit(0)
+        } else Qt.exit(1)
+    } }
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QML_IMPORT_PATH=str(base),
+                       XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                       XDG_CACHE_HOME=str(base / "cache"))
+            proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"],
+                                  env=env, text=True, capture_output=True, timeout=8)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("UNREADABLE_CONFIG_BLOCKED", proc.stdout + proc.stderr)
+
+    def test_persisted_skwd_mode_keeps_native_renderer_parked_at_boot(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-skwd-boot-") as temp:
+            base = Path(temp)
+            module = base / "testbridge"
+            module.mkdir()
+            mock_config(base, "skwd")
+            (base / "runtime").mkdir(mode=0o700)
+            (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
+            for name in ("SkwdWallpaper.qml", "SkwdThemeCoordinator.qml", "SkwdHandoff.qml"):
+                shutil.copy(ROOT / "services" / name, module / name)
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+import testbridge
+import qs.modules.common
+ShellRoot {
+    Timer { interval: 1; running: true; onTriggered: {
+        if (!SkwdWallpaper.bootDecisionMade || !SkwdWallpaper.nativeRenderingSuppressed) { Qt.exit(1); return }
+        // Editing the preference alone is never proof that Skwd released its surfaces.
+        Config.options = {panelFamily: "iris", iris: {skwd: {mode: "native"}}}
+        if (!SkwdWallpaper.nativeRenderingSuppressed) { Qt.exit(1); return }
+        console.log("SKWD_BOOT_GUARD_OK"); Qt.exit(0)
+    } }
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", QML_IMPORT_PATH=str(base),
+                       XDG_RUNTIME_DIR=str(base / "runtime"), XDG_CONFIG_HOME=str(base / "config"),
+                       XDG_CACHE_HOME=str(base / "cache"))
+            proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"],
+                                  env=env, text=True, capture_output=True, timeout=8)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("SKWD_BOOT_GUARD_OK", proc.stdout + proc.stderr)
+
     def test_handoff_over_socket_waits_for_both_outputs(self):
         quickshell = shutil.which("quickshell")
         if not quickshell:
@@ -23,6 +101,7 @@ class SkwdTransportTest(unittest.TestCase):
             base = Path(temp)
             module = base / "testbridge"
             module.mkdir()
+            mock_config(base)
             (base / "runtime").mkdir(mode=0o700)
             (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
             for name in ("SkwdWallpaper.qml", "SkwdThemeCoordinator.qml", "SkwdHandoff.qml"):
@@ -46,6 +125,7 @@ ShellRoot {
         }
         function onNativePauseRequested(id) { SkwdWallpaper.nativePauseFinished(id, true) }
         function onNativeResumeRequested(id) { SkwdWallpaper.nativeResumeFinished(id, true) }
+        function onAcquirePersistenceRequested(id, token) { SkwdWallpaper.acquisitionPersisted(id, token) }
         function onHandoffPhaseChanged() {
             if (SkwdWallpaper.handoffPhase === "skwd") {
                 wentSkwd = true
@@ -126,6 +206,7 @@ ShellRoot {
             base = Path(temp)
             module = base / "testbridge"
             module.mkdir()
+            mock_config(base)
             (base / "runtime").mkdir(mode=0o700)
             (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
             shutil.copy(ROOT / "services/SkwdWallpaper.qml", module / "SkwdWallpaper.qml")
@@ -219,6 +300,7 @@ ShellRoot {
             base = Path(temp)
             module = base / "testbridge"
             module.mkdir()
+            mock_config(base)
             (base / "runtime").mkdir(mode=0o700)
             (module / "qmldir").write_text("module testbridge\nsingleton SkwdWallpaper 1.0 SkwdWallpaper.qml\nSkwdThemeCoordinator 1.0 SkwdThemeCoordinator.qml\nSkwdHandoff 1.0 SkwdHandoff.qml\n")
             shutil.copy(ROOT / "services/SkwdWallpaper.qml", module / "SkwdWallpaper.qml")
@@ -233,7 +315,8 @@ ShellRoot {
         function onThemeSourceReady(path, output, generation) {
             if (!SkwdWallpaper.integrationEligible || SkwdWallpaper.themeAuthority !== "inir"
                     || SkwdWallpaper.outputs.length !== 1 || output !== "DP-1"
-                    || path !== "/tmp/new.png" || generation !== 3) {
+                    || path !== "/tmp/new.png" || generation !== 3
+                    || SkwdWallpaper.sourceForOutput("DP-1") !== "/tmp/new.png") {
                 console.log("SKWD_TRANSPORT_BAD_STATE")
                 Qt.exit(1)
             } else { console.log("SKWD_TRANSPORT_OK"); Qt.exit(0) }

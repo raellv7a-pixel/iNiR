@@ -9,6 +9,9 @@ Singleton {
     property string filePath: Directories.shellConfigPath
     property alias options: configOptionsJsonAdapter
     property bool ready: false
+    // Ownership-sensitive services must distinguish usable settings from the
+    // fallback "ready" state after a read or parse failure.
+    property bool loadedSafely: false
     property int revision: 0
     property bool isSettingsProcess: (Quickshell.env("INIR_STANDALONE_WINDOW") ?? "") === "1"
     property int readWriteDelay: 50 // milliseconds
@@ -657,7 +660,11 @@ Singleton {
             // Initialize the in-memory JSON mirror from disk
             try {
                 root._jsonMirror = JSON.parse(configFileView.text());
+                if (!root._jsonMirror || typeof root._jsonMirror !== "object" || Array.isArray(root._jsonMirror))
+                    throw new Error("invalid configuration root");
+                root.loadedSafely = true;
             } catch (e) {
+                root.loadedSafely = false;
                 if (root._retryLoad())
                     return;
                 Quickshell.execDetached(["/usr/bin/cp", "--", root.filePath, root.filePath + ".unreadable"]);
@@ -676,6 +683,7 @@ Singleton {
         }
         onLoadFailed: error => {
             if (error == FileViewError.FileNotFound) {
+                root.loadedSafely = true;
                 console.log("[Config] File not found, creating new file.");
                 // Ensure parent directory exists
                 const parentDir = root.filePath.substring(0, root.filePath.lastIndexOf('/'));
@@ -3931,6 +3939,11 @@ Singleton {
             }
 
             property JsonObject iris: JsonObject {
+                property JsonObject skwd: JsonObject {
+                    property string mode: "native" // native | skwd; switched by the ownership coordinator
+                    property string themeOutput: "DP-1"
+                    property string selector: "skwd" // skwd | native, in integrated mode
+                }
                 property JsonObject sidebars: JsonObject {
                     property JsonObject left: JsonObject {
                         property bool enable: true

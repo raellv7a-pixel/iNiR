@@ -23,6 +23,8 @@ import qs.modules.lock
 Item {
     id: root
 
+    Component.onCompleted: SkwdIntegration.start()
+
     component PanelLoader: LazyLoader {
         required property string identifier
         property bool extraCondition: true

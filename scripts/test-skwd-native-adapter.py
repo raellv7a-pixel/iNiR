@@ -35,7 +35,7 @@ singleton Appearance 1.0 Appearance.qml
             (functions / "qmldir").write_text("module qs.modules.common.functions\nsingleton FileUtils 1.0 FileUtils.qml\nsingleton StringUtils 1.0 StringUtils.qml\n")
             (common / "Config.qml").write_text('''pragma Singleton
 import QtQuick
-QtObject { property var options: ({background: {backend: {provider: "awww"}}, panelFamily: "iris"}) }
+QtObject { property bool ready: true; property bool loadedSafely: true; property var options: ({background: {backend: {provider: "awww"}}, panelFamily: "iris"}) }
 ''')
             (services / "SkwdWallpaper.qml").write_text('''pragma Singleton
 import QtQuick

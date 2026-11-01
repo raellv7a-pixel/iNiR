@@ -375,8 +375,7 @@ ColumnLayout {
                     colBackgroundHover: heroTools.framed ? IrisStyle.fillHover : IrisStyle.veilStrong
                     Accessible.name: Translation.tr("Change wallpaper")
                     onClicked: {
-                        GlobalStates.wallpaperSelectorTargetMonitor = page.island.targetScreen?.name ?? ""
-                        GlobalStates.wallpaperSelectorOpen = true
+                        SkwdIntegration.openSelector(page.island.targetScreen?.name ?? "")
                     }
                 }
             }

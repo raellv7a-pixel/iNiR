@@ -9192,5 +9192,20 @@
   "No applications running": "Nenhum aplicativo em execução",
   "Running apps": "Aplicativos em execução",
   "Visible rows": "Linhas visíveis",
-  "Maximum number of complete rows shown in All apps, limited by the available screen space.": "Número máximo de linhas completas em Todos os aplicativos, limitado pelo espaço disponível na tela."
+  "Maximum number of complete rows shown in All apps, limited by the available screen space.": "Número máximo de linhas completas em Todos os aplicativos, limitado pelo espaço disponível na tela.",
+  "Open Skwd-wall": "Abrir Skwd-wall",
+  "Open Skwd's library and settings. Enable integration before applying a wallpaper.": "Abra a biblioteca e as configurações do Skwd. Ative a integração antes de aplicar um papel de parede.",
+  "Wallpaper manager": "Gerenciador de papéis de parede",
+  "Use iNiR's renderer or let Skwd-wall manage wallpapers while iNiR generates the colours.": "Use o renderizador da iNiR ou deixe o Skwd-wall gerenciar os papéis de parede enquanto a iNiR gera as cores.",
+  "iNiR native": "Nativo da iNiR",
+  "Switching wallpaper managers requires the iRiS overlay and the Awww backend.": "Para alternar o gerenciador de papéis de parede, use as configurações sobrepostas da iRiS e o backend Awww.",
+  "In Skwd, select iNiR theme authority and turn off pick-only mode.": "No Skwd, selecione a iNiR como responsável pelos temas e desative o modo somente seleção.",
+  "Could not connect to a compatible Skwd daemon.": "Não foi possível conectar a um serviço Skwd compatível.",
+  "Could not switch wallpaper managers. Check that Skwd uses skwd-paper and try again.": "Não foi possível alternar o gerenciador de papéis de parede. Verifique se o Skwd usa skwd-paper e tente novamente.",
+  "Switching wallpaper manager…": "Alternando o gerenciador de papéis de parede…",
+  "Wallpaper selector": "Seletor de papel de parede",
+  "Choose which interface opens from the Island and wallpaper buttons.": "Escolha a interface aberta pela ilha e pelos botões de papel de parede.",
+  "iRiS gallery": "Galeria da iRiS",
+  "Monitor for global colours": "Monitor para as cores globais",
+  "Use this monitor's wallpaper as the source for the shell and application colours.": "Use o papel de parede deste monitor como referência para as cores da shell e dos aplicativos."
 }

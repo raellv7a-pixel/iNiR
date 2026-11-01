@@ -11,6 +11,40 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class HandoffTest(unittest.TestCase):
+    def test_boot_recovery_never_assumes_native_owner_after_failed_release(self):
+        quickshell = shutil.which("quickshell")
+        if not quickshell:
+            self.skipTest("quickshell is not installed")
+        with tempfile.TemporaryDirectory(prefix="inir-handoff-boot-") as temp:
+            base = Path(temp)
+            (base / "runtime").mkdir(mode=0o700)
+            shutil.copy(ROOT / "services/SkwdHandoff.qml", base / "SkwdHandoff.qml")
+            (base / "shell.qml").write_text('''import QtQuick
+import Quickshell
+ShellRoot {
+    SkwdHandoff {
+        id: handoff
+        phase: "blocked"
+        nativeKnownActive: false
+        onReleaseRequested: id => handoff.complete(id, handoff.phase, false, {message: "unreachable"})
+        onResumeNativeRequested: id => { console.log("UNSAFE_RESUME"); Qt.exit(1) }
+        onFailed: message => verify.start()
+    }
+    Timer { id: verify; interval: 10; onTriggered: {
+        if (handoff.phase === "blocked" && !handoff.nativeKnownActive) { console.log("BOOT_BLOCKED_OK"); Qt.exit(0) }
+        else Qt.exit(1)
+    } }
+    Component.onCompleted: handoff.request("skwd")
+    Timer { interval: 3000; running: true; onTriggered: Qt.exit(1) }
+}
+''')
+            env = dict(os.environ, QT_QPA_PLATFORM="offscreen", XDG_RUNTIME_DIR=str(base / "runtime"),
+                       XDG_CONFIG_HOME=str(base / "config"), XDG_CACHE_HOME=str(base / "cache"))
+            proc = subprocess.run([quickshell, "-p", str(base / "shell.qml"), "--no-color"], env=env,
+                                  text=True, capture_output=True, timeout=8)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("BOOT_BLOCKED_OK", proc.stdout + proc.stderr)
+
     def test_late_native_pause_must_finish_before_resume(self):
         quickshell = shutil.which("quickshell")
         if not quickshell:
