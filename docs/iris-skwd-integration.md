@@ -85,7 +85,7 @@ daemon anterior (o último comando não inicia nenhum renderer):
 systemctl --user stop inir.service
 cd ~/Projetos/inir
 python scripts/skwd-restore-native.py --shell-stopped && \
-  { pkill -u "$UID" -x skwd-walld || test "$?" -eq 1; }
+  { pkill -u raell -x skwd-walld || test "$?" -eq 1; }
 ```
 
 Se a recuperação falhar, siga a seção de recuperação abaixo antes de continuar.
@@ -182,6 +182,40 @@ python tests/integration-inir-palette-isolated.py
 
 Depois dessa correção, basta carregar o daemon recompilado. Na sessão de teste,
 selecione primeiro **Nativo da iNiR** e aguarde a liberação, feche o Skwd, encerre
-o daemon antigo com `pkill -u "$UID" -x skwd-walld` e selecione **Skwd-wall**
+o daemon antigo com `pkill -u raell -x skwd-walld` e selecione **Skwd-wall**
 novamente. A própria shell iniciará o executável preparado no diretório de teste.
 Não é necessário sincronizar ou substituir a instalação ativa para testar isso.
+
+## Instalação permanente aprovada
+
+Após a aprovação visual do fluxo de wallpaper e das cores da shell e do Skwd,
+os executáveis testados foram copiados para uma versão independente dos diretórios
+de compilação em `~/.local/lib/inir-skwd/releases/20261101-005224/bin`.
+`~/.local/lib/inir-skwd/current` aponta para essa versão, com launchers em
+`~/.local/bin`. O manifesto da versão registra os commits e SHA-256 dos binários.
+A biblioteca Steam compartilhada acompanha o helper no mesmo diretório.
+
+A iNiR é sincronizada por `./setup update --local`, mantendo `repo-copy` e a
+branch `feature/iris-skwd-integration`. Não existe um serviço Skwd independente
+habilitado: a shell inicia o daemon quando necessário, preservando a transferência
+de controle. A interface também fica disponível no menu de aplicativos.
+
+O backup imediatamente anterior à instalação está em
+`~/inir-backup/skwd-install-20261101-005224`, com arquivo completo, SHA-256 e
+manifesto dos arquivos. A recuperação pode ser conferida sem alterar a sessão:
+
+```bash
+inir-skwd-rollback --verify
+```
+
+Para restaurar o runtime anterior e voltar ao modo nativo:
+
+```bash
+inir-skwd-rollback
+```
+
+A ferramenta para a shell, exige confirmação de liberação do Skwd, preserva as
+preferências atuais selecionando apenas o modo nativo e restaura runtime,
+launcher e metadados anteriores. O runtime integrado é movido para um diretório
+vizinho de recuperação; não são executados comandos Git. Os binários Skwd
+permanecem instalados e bloqueados para renderização no modo nativo.
