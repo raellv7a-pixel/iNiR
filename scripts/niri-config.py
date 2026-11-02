@@ -22,6 +22,7 @@ Commands:
   validate             Validate current Niri config via niri validate
   detect-customizations Report Niri files that differ from shipped iNiR defaults
   sync-backdrop-overview-shadow on|off  Manage the backdrop-only overview shadow override
+  sync-game-mode-window-effects on|off Temporarily suppress Niri window background blur
   set SECTION KEY VAL  Surgical edit of a single config value
   get-binds            JSON of all keybinds from 70-binds.kdl with categories/metadata
   set-bind KEY ACTION  Add or update a keybind in 70-binds.kdl (surgical edit)
@@ -56,6 +57,8 @@ BACKDROP_SHADOW_OVERRIDE_START = "// >>> inir-backdrop-only >>>"
 BACKDROP_SHADOW_OVERRIDE_END = "// <<< inir-backdrop-only <<<"
 ALT_TAB_OVERRIDE_START = "// >>> inir-alt-tab >>>"
 ALT_TAB_OVERRIDE_END = "// <<< inir-alt-tab <<<"
+GAME_MODE_WINDOW_EFFECT_START = "// >>> inir-game-mode-window-effects >>>"
+GAME_MODE_WINDOW_EFFECT_END = "// <<< inir-game-mode-window-effects <<<"
 
 
 def get_niri_config_dir():
@@ -1960,6 +1963,47 @@ def cmd_sync_backdrop_overview_shadow(args):
     return _write_validated(target_file, next_content)
 
 
+def cmd_sync_game_mode_window_effects(args):
+    if len(args) != 1 or args[0] not in ("on", "off"):
+        print(json.dumps({"error": "Usage: sync-game-mode-window-effects on|off"}))
+        return 1
+
+    target_file = resolve_niri_section_file("config.d/90-user-extra.kdl")
+    content = target_file.read_text() if target_file.exists() else ""
+    managed_pattern = re.compile(
+        rf"(?m)^[ \t]*{re.escape(GAME_MODE_WINDOW_EFFECT_START)}[ \t]*\r?\n"
+        rf".*?^[ \t]*{re.escape(GAME_MODE_WINDOW_EFFECT_END)}[ \t]*(?:\r?\n|$)",
+        re.S,
+    )
+    matches = list(managed_pattern.finditer(content))
+    if (content.count(GAME_MODE_WINDOW_EFFECT_START) != content.count(GAME_MODE_WINDOW_EFFECT_END)
+            or len(matches) > 1
+            or (GAME_MODE_WINDOW_EFFECT_START in content and not matches)):
+        print(json.dumps({"error": "Malformed or duplicate Game Mode window-effects block"}))
+        return 1
+
+    next_content = managed_pattern.sub("", content)
+    if args[0] == "on":
+        managed_block = (
+            f"{GAME_MODE_WINDOW_EFFECT_START}\n"
+            "window-rule {\n"
+            "    background-effect {\n"
+            "        blur false\n"
+            "    }\n"
+            "}\n"
+            f"{GAME_MODE_WINDOW_EFFECT_END}\n"
+        )
+        if next_content and not next_content.endswith("\n"):
+            next_content += "\n"
+        next_content += managed_block
+
+    if next_content == content:
+        print(json.dumps({"success": True, "file": str(target_file), "changed": False}))
+        return 0
+
+    return _write_validated(target_file, next_content)
+
+
 def _sync_cursor_env(theme=None, size=None):
     """Sync cursor theme/size to environment.d, gsettings, and running session.
 
@@ -3443,7 +3487,7 @@ def main():
         print(
             json.dumps(
                 {
-                    "error": "No command. Use: outputs, apply-output, persist-output, persist-layout, get-input, get-hot-corners, get-layout, get-animations, get-window-rules, list-cursor-themes, sync-cursor, validate, detect-customizations, set, get-binds, set-bind, remove-bind, get-alt-tab, set-alt-tab"
+                    "error": "No command. Use: outputs, apply-output, persist-output, persist-layout, get-input, get-hot-corners, get-layout, get-animations, get-window-rules, list-cursor-themes, sync-cursor, validate, detect-customizations, sync-backdrop-overview-shadow, sync-game-mode-window-effects, set, get-binds, set-bind, remove-bind, get-alt-tab, set-alt-tab"
                 }
             )
         )
@@ -3470,6 +3514,7 @@ def main():
         "validate": lambda: cmd_validate(),
         "detect-customizations": lambda: cmd_detect_customizations(),
         "sync-backdrop-overview-shadow": lambda: cmd_sync_backdrop_overview_shadow(args),
+        "sync-game-mode-window-effects": lambda: cmd_sync_game_mode_window_effects(args),
         "set": lambda: cmd_set(args),
         "get-binds": lambda: cmd_get_binds(),
         "set-bind": lambda: cmd_set_bind(args),

@@ -5,6 +5,11 @@ All notable changes to iNiR will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- Game Mode temporarily appends an all-window Niri `background-effect { blur false }` override while **Stop glass and blur** is enabled, then removes only its own rule when the mode ends.
+
 ## [2.33.0] - 2026-10-08
 
 **iRiS 0.3**

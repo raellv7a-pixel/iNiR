@@ -74,6 +74,18 @@ Singleton {
             setNiriAnimations(!active || !controlNiriAnimations)
         }
     }
+    onDisableEffectsChanged: {
+        if (CompositorService.isNiri && active)
+            root.suppressNiriToast = true
+        root.syncNiriWindowEffects()
+    }
+
+    property bool _niriWindowEffectsSyncQueued: false
+
+    function syncNiriWindowEffects(): void {
+        if (CompositorService.isNiri)
+            niriWindowEffectsSyncTimer.restart()
+    }
 
     readonly property bool suppressNotifications: Config.options?.gameMode?.suppressNotifications ?? true
 
@@ -294,11 +306,46 @@ Singleton {
         interval: 900
         repeat: false
         onTriggered: {
-            if (!CompositorService.isNiri || !root.controlNiriAnimations)
+            if (!CompositorService.isNiri)
                 return
-            const shouldEnable = !root.active
-            root._lastNiriAnimState = shouldEnable
-            root.setNiriAnimations(shouldEnable)
+            if (root.controlNiriAnimations) {
+                const shouldEnable = !root.active
+                root._lastNiriAnimState = shouldEnable
+                root.setNiriAnimations(shouldEnable)
+            }
+            root.syncNiriWindowEffects()
+        }
+    }
+
+    Timer {
+        id: niriWindowEffectsSyncTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            if (niriWindowEffectsSyncProcess.running) {
+                root._niriWindowEffectsSyncQueued = true
+                return
+            }
+            niriWindowEffectsSyncProcess.command = [
+                "/usr/bin/python3",
+                Quickshell.shellPath("scripts/niri-config.py"),
+                "sync-game-mode-window-effects",
+                root.active && root.disableEffects ? "on" : "off"
+            ]
+            niriWindowEffectsSyncProcess.running = true
+        }
+    }
+
+    Process {
+        id: niriWindowEffectsSyncProcess
+        onExited: (exitCode) => {
+            if (exitCode !== 0)
+                console.warn("[GameMode] Failed to sync Niri window background effects")
+            suppressClearTimer.restart()
+            if (root._niriWindowEffectsSyncQueued) {
+                root._niriWindowEffectsSyncQueued = false
+                niriWindowEffectsSyncTimer.restart()
+            }
         }
     }
 
@@ -367,10 +414,12 @@ Singleton {
 
     onActiveChanged: {
         root._log("[GameMode] Active:", active, "(manual:", _manualActive, "auto:", _reactiveAutoActive, ")")
-        if (CompositorService.isNiri && controlNiriAnimations) {
+        if (CompositorService.isNiri && (controlNiriAnimations || disableEffects)) {
             root.suppressNiriToast = true
-            niriAnimDebounce.restart()
+            if (controlNiriAnimations)
+                niriAnimDebounce.restart()
         }
+        root.syncNiriWindowEffects()
         if (root.discoverOverlayInstalled)
             discoverOverlayDebounce.restart()
     }
